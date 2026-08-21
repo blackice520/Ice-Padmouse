@@ -774,11 +774,11 @@ class OverlayController(private val service: GestureAccessibilityService) {
 
     // ================= 物理手柄（焦点捕获） =================
 
-    /** 激活手柄焦点：添加 1×1 可聚焦窗口（常驻不销毁，避免重新添加后焦点丢失）。
-     *  按键由焦点窗+服务双通道处理；摇杆轴事件由焦点窗接收。 */
+    /** 激活手柄焦点：添加 1×1 窗口（常驻不销毁）。
+     *  聚焦状态跟随鼠标开关：激活=聚焦（接管按键），关闭=不聚焦（按键还给应用/游戏）。 */
     private fun activateGamepadFocus() {
         if (gamepadView != null) {
-            requestFocusRetry()
+            applyFocusViewFocusable(mouseActive)
             return
         }
         try {
@@ -788,16 +788,27 @@ class OverlayController(private val service: GestureAccessibilityService) {
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                     WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
                     WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
+                if (!mouseActive) flags = flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 x = 0
                 y = 0
             }
             wm.addView(v, gamepadParams)
             gamepadView = v
-            requestFocusRetry()
+            if (mouseActive) requestFocusRetry()
         } catch (t: Throwable) {
             t.printStackTrace()
             gamepadView = null
         }
+    }
+
+    /** 焦点窗聚焦状态随鼠标开关切换 */
+    private fun applyFocusViewFocusable(focusable: Boolean) {
+        val v = gamepadView ?: return
+        val p = gamepadParams ?: return
+        p.flags = if (focusable) p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+        else p.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        runCatching { wm.updateViewLayout(v, p) }
+        if (focusable) requestFocusRetry()
     }
 
     /** requestFocus 有竞态：添加窗口后立即请求可能失败，延迟重试 */
@@ -830,7 +841,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
         mouseActive = !mouseActive
         if (mouseActive) {
             showCursor()
-            requestFocusRetry()
+            applyFocusViewFocusable(true)
         } else {
             hideCursor()
             releaseLeftButton()
@@ -842,6 +853,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
             vJoyX = 0f
             vJoyY = 0f
             vJoySpeed = 0f
+            // 鼠标关闭：焦点窗让出，游戏/应用直接收到手柄按键
+            applyFocusViewFocusable(false)
         }
         refreshModeButtons()
         haptic()
@@ -886,6 +899,16 @@ class OverlayController(private val service: GestureAccessibilityService) {
     private var lastKeyActionTime = 0L
     private var lastKeyAction: Action? = null
 
+    /** 按键落盘诊断（荣耀 logcat 加密） */
+    private fun logKeyEvent(keyCode: Int, name: String, down: Boolean, from: String) {
+        try {
+            val line = "${System.currentTimeMillis()} [$from] code=$keyCode name=$name down=$down\n"
+            java.io.FileOutputStream(java.io.File(ctx.filesDir, "keys.log"), true)
+                .use { it.write(line.toByteArray()) }
+        } catch (_: Throwable) {
+        }
+    }
+
     /** 手柄摇杆轴事件（来自 GamepadInputView） */
     fun onGamepadMotion(event: MotionEvent): Boolean {
         if (!mouseActive) return false
@@ -895,13 +918,15 @@ class OverlayController(private val service: GestureAccessibilityService) {
         // 左摇杆：AXIS_X / AXIS_Y
         stickX = event.getAxisValue(MotionEvent.AXIS_X)
         stickY = event.getAxisValue(MotionEvent.AXIS_Y)
-        // 右摇杆：RX/RY（部分手柄用 Z/RZ）
+        // 右摇杆：兼容两种常见布局——
+        //   A) RX/RY（标准 Xbox 式）  B) Z/RZ（DualShock 式/部分国产手柄）
+        //   水平 = max(|RX|, |Z|)，垂直 = max(|RY|, |RZ|)
         var rx = event.getAxisValue(MotionEvent.AXIS_RX)
-        var ry = event.getAxisValue(MotionEvent.AXIS_RY)
         val rz = event.getAxisValue(MotionEvent.AXIS_Z)
+        if (kotlin.math.abs(rx) <= kotlin.math.abs(rz)) rx = rz
+        var ry = event.getAxisValue(MotionEvent.AXIS_RY)
         val rw = event.getAxisValue(MotionEvent.AXIS_RZ)
-        if (kotlin.math.abs(rx) <= kotlin.math.abs(rw)) rx = rw
-        if (kotlin.math.abs(ry) <= kotlin.math.abs(rz)) ry = rz
+        if (kotlin.math.abs(ry) <= kotlin.math.abs(rw)) ry = rw
         scrollX = rx
         scrollY = ry
         lastMotionTime = System.currentTimeMillis()
@@ -912,6 +937,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
     /** 手柄按键事件（来自焦点窗或服务全局通道；两条路径都处理，用消抖去重） */
     fun onGamepadKey(keyCode: Int, down: Boolean, event: KeyEvent?): Boolean {
         val name = ConfigStore.keyNameOf(keyCode) ?: return false
+        logKeyEvent(keyCode, name, down, "onGamepadKey")
         val cfg = config
         // 鼠标未激活：仅响应唤出键与映射为"唤出/隐藏光标"的键，其余放行（回落给应用）
         if (!mouseActive) {
