@@ -5,6 +5,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
+import android.util.AttributeSet
 import android.view.MotionEvent
 import android.view.View
 import com.joymouse.app.config.Action
@@ -15,7 +16,7 @@ import com.joymouse.app.config.shortLabel
  * 虚拟手柄图例：画出物理手柄布局，每个按键上直接标注当前映射的功能。
  * 点按任意按键 → onKeyTap 回调（由界面弹出动作选择）。
  */
-class GamepadDiagramView(context: Context) : View(context) {
+class GamepadDiagramView(context: Context, attrs: AttributeSet? = null) : View(context, attrs) {
 
     /** 点按手柄按键回调（参数为键名 a/b/x/y/lb/...） */
     var onKeyTap: ((String) -> Unit)? = null
