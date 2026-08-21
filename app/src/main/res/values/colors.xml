@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary">#00897B</color>
+    <color name="primary_dark">#00695C</color>
+    <color name="accent">#00C853</color>
+    <color name="status_on">#00A85C</color>
+    <color name="status_off">#D32F2F</color>
+    <color name="ic_launcher_background">#00695C</color>
+    <color name="card_bg">#F7FAF9</color>
+</resources>

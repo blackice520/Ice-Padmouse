@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">JoyMouse 手柄鼠标</string>
+    <string name="accessibility_service_label">JoyMouse 手势模拟服务</string>
+    <string name="accessibility_service_desc">用于在屏幕上模拟触摸手势（点击、双击、长按、拖拽、滑动、滚动），配合悬浮控制台把手柄与自定义按键映射为鼠标操作。本服务不读取屏幕内容，仅在您操作控制台时注入手势。</string>
+
+    <string name="title_main">JoyMouse 手柄鼠标映射</string>
+    <string name="subtitle_main">在手机上模拟电脑鼠标：虚拟摇杆移动光标，自定义按键实现点击 / 拖拽 / 滑动 / 系统操作</string>
+    <string name="card_access">无障碍服务（手势模拟）</string>
+    <string name="card_overlay">悬浮窗权限（显示控制台与光标）</string>
+    <string name="card_console">悬浮控制台</string>
+    <string name="card_gamepad">物理手柄映射（蓝牙 / OTG）</string>
+    <string name="btn_ime">去启用输入法</string>
+    <string name="ime_label">JoyMouse 手柄输入法</string>
+    <string name="gamepad_help">原理：系统把硬件按键优先交给当前输入法。在「系统设置 → 语言与输入法 → 屏幕键盘 → 管理键盘」中启用并切换为 JoyMouse 手柄输入法后，手柄按键即映射为鼠标动作（A=单击，B=长按右键，X=双击，Y=滚轮上，L1=滚轮下，L2/R2=左右滑动，方向键=移动光标，SELECT=主页，START=最近任务）。摇杆轴不支持，请用悬浮控制台。</string>
+    <string name="gamepad_status_off">○ 未启用</string>
+    <string name="gamepad_status_on">● 已启用（尚未切换激活）</string>
+    <string name="gamepad_status_active">● 正在使用中</string>
+    <string name="btn_access">去开启</string>
+    <string name="btn_overlay">去授权</string>
+    <string name="btn_edit_layout">编辑按键布局</string>
+    <string name="label_speed">光标速度</string>
+    <string name="label_opacity">控制台透明度</string>
+    <string name="guide_title">使用说明</string>
+    <string name="guide_text">1. 依次开启上方两项权限；\n2. 点击「显示悬浮控制台」；\n3. 摇杆移动光标：默认模式轻点摇杆=左键；点「拖拽」后按住摇杆即可拖动目标（例如拖动进度条、窗口）；点「滚轮」后上下推摇杆即可滚动页面；\n4. 点击「编辑」进入布局编辑：拖动自定义按键调整位置，点按键选择动作，可添加/删除/调整大小；\n5. 长按任意自定义按键也可快速进入编辑。</string>
+</resources>
