@@ -211,13 +211,15 @@ class OverlayController(private val service: GestureAccessibilityService) {
         val iv = ImageView(ctx)
         iv.setImageResource(R.drawable.ic_cursor_dot)
         applyCursorStyle(iv)
-        // 关键：光标窗口必须 FLAG_NOT_TOUCHABLE！
-        // 否则注入的点击会打在自己光标窗口上被吞掉（参考应用 flags=792 即含 NOT_TOUCHABLE）
+        // 关键：光标窗口必须 FLAG_NOT_TOUCHABLE（否则注入点击被自己吞掉）
+        // 且必须 FLAG_LAYOUT_IN_SCREEN（否则窗口坐标原点在状态栏下方，
+        // 与注入手势的屏幕坐标系错位——点击会偏上"一个状态栏高度"）
         cursorParams = WindowManager.LayoutParams(
             size, size,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             android.graphics.PixelFormat.TRANSLUCENT
         ).apply {
@@ -1141,8 +1143,10 @@ class OverlayController(private val service: GestureAccessibilityService) {
             w, h,
             // 无障碍专用窗口类型：由无障碍服务创建，无需 SYSTEM_ALERT_WINDOW 权限
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            // LAYOUT_IN_SCREEN 保证窗口坐标与注入手势同为屏幕坐标系（对齐参考应用）
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             android.graphics.PixelFormat.TRANSLUCENT
         ).apply {
