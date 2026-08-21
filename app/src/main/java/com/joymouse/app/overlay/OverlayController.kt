@@ -118,6 +118,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
     /** 右摇杆滚动方向向量 */
     private var scrollX = 0f
     private var scrollY = 0f
+    /** 滚动手势链是否进行中（参考应用方案：手势完成回调后立即派发下一个，形成连续滚动流） */
+    private var scrollGestureBusy = false
     /** 左键按下状态机：held=按下，dragging=已转拖拽 */
     private var leftHeld = false
     private var leftDragging = false
@@ -252,27 +254,34 @@ class OverlayController(private val service: GestureAccessibilityService) {
         scheduleCursorHide()
     }
 
-    /** 播放/暂停：通过当前活跃媒体会话的 TransportControls 控制 */
+    /** 播放/暂停：优先通过活跃媒体会话控制（QQ音乐/视频 App 等）；
+     *  无媒体会话时回退为双击屏幕中央（参考应用的"点按区"思路，适配视频 App 的中央暂停键）。 */
     fun toggleMediaPlayPause() {
         try {
-            val msm = ctx.getSystemService(Context.MEDIA_SESSION_SERVICE) as? android.media.session.MediaSessionManager ?: return
-            val sessions = msm.getActiveSessions(null)
-            // 优先正在播放的会话，其次任意非 NONE 状态的会话
-            val playing = sessions.firstOrNull {
-                it.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
+            val msm = ctx.getSystemService(Context.MEDIA_SESSION_SERVICE) as? android.media.session.MediaSessionManager
+            var handled = false
+            if (msm != null) {
+                val sessions = msm.getActiveSessions(null)
+                val playing = sessions.firstOrNull {
+                    it.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
+                }
+                val session = playing ?: sessions.firstOrNull {
+                    it.playbackState?.state?.let { s ->
+                        s != android.media.session.PlaybackState.STATE_NONE
+                    } == true
+                }
+                if (session != null) {
+                    val isPlaying = session.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
+                    if (isPlaying) session.transportControls.pause()
+                    else session.transportControls.play()
+                    handled = true
+                }
             }
-            val session = playing ?: sessions.firstOrNull {
-                it.playbackState?.state?.let { s ->
-                    s != android.media.session.PlaybackState.STATE_NONE
-                } == true
+            if (!handled) {
+                // 兜底：双击屏幕中央（视频 App 暂停区）
+                android.util.Log.w("JoyMouse", "播放/暂停：无活跃媒体会话，回退为双击屏幕中央")
+                GestureAccessibilityService.instance?.doubleTap(screenW / 2f, screenH / 2f)
             }
-            if (session == null) {
-                android.util.Log.w("JoyMouse", "播放/暂停：未找到活跃媒体会话（请先播放音乐/视频）")
-                return
-            }
-            val isPlaying = session.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
-            if (isPlaying) session.transportControls.pause()
-            else session.transportControls.play()
         } catch (t: Throwable) {
             t.printStackTrace()
         }
@@ -802,6 +811,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
             stickY = 0f
             scrollX = 0f
             scrollY = 0f
+            scrollGestureBusy = false
             vJoyX = 0f
             vJoyY = 0f
             vJoySpeed = 0f
@@ -999,14 +1009,19 @@ class OverlayController(private val service: GestureAccessibilityService) {
             }
         }
 
-        // 4) 右摇杆 → 滚动（每 200ms 一次）
+        // 4) 右摇杆 → 链式滚动（参考应用方案）
+        //    派发一个 150ms 滑动，完成回调后立即派发下一个 → 连续无间隙的滚动流；
+        //    方向跟随摇杆（摇杆向下=手指上滑=页面下滚），长度随推杆幅度与滚动速度设置变化
         val scrollLen = hypot(scrollX, scrollY)
-        if (scrollLen > dead && !leftHeld) {
-            if (now - lastScrollTime > 200) {
-                lastScrollTime = now
-                val step = (cfg.scrollStep * cfg.scrollSpeed / 100f).toInt().coerceAtLeast(80)
-                s.scrollAt(cursorX, cursorY, step, up = scrollY < 0)
-                lastActivity = now
+        if (scrollLen > dead && !leftHeld && !scrollGestureBusy) {
+            val norm = ((scrollLen - dead) / (1f - dead)).coerceIn(0f, 1f)
+            val len = (cfg.scrollStep * cfg.scrollSpeed / 100f * (0.5f + norm * 0.6f)).coerceAtLeast(60f)
+            val dirX = scrollX / scrollLen
+            val dirY = scrollY / scrollLen
+            scrollGestureBusy = true
+            lastActivity = now
+            s.swipe(cursorX, cursorY, cursorX - dirX * len, cursorY - dirY * len, 150) { ok ->
+                scrollGestureBusy = false
             }
         }
 
