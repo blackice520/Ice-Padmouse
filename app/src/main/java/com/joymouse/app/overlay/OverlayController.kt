@@ -768,7 +768,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
             Action.MEDIA_REWIND -> s.doubleTap(screenW * 0.2f, cursorY)
             Action.TOGGLE_MOUSE -> toggleMouse()
             Action.TOGGLE_PANEL -> togglePanel()
-            else -> s.performGlobal(action)
+            else -> performGlobalThrottled(action)
         }
     }
 
@@ -973,6 +973,16 @@ class OverlayController(private val service: GestureAccessibilityService) {
             else execute(action)
         }
         return true
+    }
+
+    /** 全局系统动作限流：快速连按（如 B/START）不再密集触发系统动作，防系统看门狗误杀 */
+    private var lastGlobalActionTime = 0L
+
+    fun performGlobalThrottled(action: Action) {
+        val now = System.currentTimeMillis()
+        if (now - lastGlobalActionTime < 250) return
+        lastGlobalActionTime = now
+        GestureAccessibilityService.instance?.performGlobal(action)
     }
 
     /** 左键按下：不立即派发，等 tick 决定点击/拖拽。按下点取光标当前位置 */
