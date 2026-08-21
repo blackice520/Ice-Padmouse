@@ -190,7 +190,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
             if (config.panelVisible) showPanel()
             rebuildButtons()
             if (editMode) showEditBar()
-            if (mouseActive) activateGamepadFocus()
+            // 焦点窗常驻：无论鼠标是否激活都创建（未激活时仅响应唤出键，其余按键回落给应用）
+            activateGamepadFocus()
             tickHandler.removeCallbacks(tickRunnable)
             tickHandler.post(tickRunnable)
         } catch (t: Throwable) {
@@ -361,8 +362,12 @@ class OverlayController(private val service: GestureAccessibilityService) {
         val (rw, rh) = realScreenSize()
         cursorX = cursorX.coerceIn(0f, rw.toFloat())
         cursorY = cursorY.coerceIn(0f, rh.toFloat())
-        p.x = (cursorX - size / 2f).toInt()
-        p.y = (cursorY - size / 2f).toInt()
+        val nx = (cursorX - size / 2f).toInt()
+        val ny = (cursorY - size / 2f).toInt()
+        // 位置未变时跳过（减少 binder 调用，防止高频 updateViewLayout 压力）
+        if (p.x == nx && p.y == ny) return
+        p.x = nx
+        p.y = ny
         runCatching { wm.updateViewLayout(c, p) }
     }
 
@@ -769,9 +774,13 @@ class OverlayController(private val service: GestureAccessibilityService) {
 
     // ================= 物理手柄（焦点捕获） =================
 
-    /** 激活手柄焦点：添加 1×1 可聚焦窗口，捕获手柄按键与摇杆轴 */
+    /** 激活手柄焦点：添加 1×1 可聚焦窗口（常驻不销毁，避免重新添加后焦点丢失）。
+     *  按键由焦点窗+服务双通道处理；摇杆轴事件由焦点窗接收。 */
     private fun activateGamepadFocus() {
-        if (gamepadView != null) return
+        if (gamepadView != null) {
+            requestFocusRetry()
+            return
+        }
         try {
             val v = GamepadInputView(ctx, this)
             gamepadParams = baseParams(1, 1).apply {
@@ -784,18 +793,32 @@ class OverlayController(private val service: GestureAccessibilityService) {
             }
             wm.addView(v, gamepadParams)
             gamepadView = v
-            v.requestFocus()
+            requestFocusRetry()
         } catch (t: Throwable) {
             t.printStackTrace()
             gamepadView = null
         }
     }
 
-    /** 关闭手柄焦点 */
+    /** requestFocus 有竞态：添加窗口后立即请求可能失败，延迟重试 */
+    private fun requestFocusRetry() {
+        val v = gamepadView ?: return
+        try {
+            v.requestFocus()
+            tickHandler.postDelayed({
+                if (gamepadView === v && !v.hasFocus()) v.requestFocus()
+            }, 100)
+            tickHandler.postDelayed({
+                if (gamepadView === v && !v.hasFocus()) v.requestFocus()
+            }, 400)
+        } catch (t: Throwable) {
+            t.printStackTrace()
+        }
+    }
+
+    /** 鼠标关闭时不再销毁焦点窗（保持按键通道常驻），只隐藏光标、停用注入 */
     private fun deactivateGamepadFocus() {
-        gamepadView?.let { runCatching { wm.removeView(it) } }
-        gamepadView = null
-        gamepadParams = null
+        // 常驻：焦点窗保留，按键通道不中断（未激活时仅响应唤出键，其余放行给应用）
     }
 
     /**
@@ -806,10 +829,9 @@ class OverlayController(private val service: GestureAccessibilityService) {
     fun toggleMouse() {
         mouseActive = !mouseActive
         if (mouseActive) {
-            activateGamepadFocus()
             showCursor()
+            requestFocusRetry()
         } else {
-            deactivateGamepadFocus()
             hideCursor()
             releaseLeftButton()
             stickX = 0f
@@ -860,6 +882,10 @@ class OverlayController(private val service: GestureAccessibilityService) {
         return rects
     }
 
+    /** 按键消抖：双通道（焦点窗+服务）可能重复送达，250ms 内同动作只执行一次 */
+    private var lastKeyActionTime = 0L
+    private var lastKeyAction: Action? = null
+
     /** 手柄摇杆轴事件（来自 GamepadInputView） */
     fun onGamepadMotion(event: MotionEvent): Boolean {
         if (!mouseActive) return false
@@ -883,25 +909,39 @@ class OverlayController(private val service: GestureAccessibilityService) {
         return true
     }
 
-    /** 手柄按键事件（来自 GamepadInputView 或服务 onKeyEvent） */
+    /** 手柄按键事件（来自焦点窗或服务全局通道；两条路径都处理，用消抖去重） */
     fun onGamepadKey(keyCode: Int, down: Boolean, event: KeyEvent?): Boolean {
-        if (!mouseActive) return false
         val name = ConfigStore.keyNameOf(keyCode) ?: return false
+        val cfg = config
+        // 鼠标未激活：仅响应唤出键与映射为"唤出/隐藏光标"的键，其余放行（回落给应用）
+        if (!mouseActive) {
+            val isToggle = name == cfg.toggleKey || cfg.gamepadMap[name] == Action.TOGGLE_MOUSE.id
+            if (isToggle && down && (event == null || event.repeatCount == 0)) {
+                toggleMouse()
+                return true
+            }
+            return false
+        }
         // 唤出键：切换鼠标开关（仅在按下瞬间）
-        if (name == config.toggleKey) {
+        if (name == cfg.toggleKey) {
             if (down && (event == null || event.repeatCount == 0)) toggleMouse()
             return true
         }
         // 左键（单击/拖拽）状态机：A 键（或交换后 B 键）
-        val clickKey = if (config.swapAB) "b" else "a"
+        val clickKey = if (cfg.swapAB) "b" else "a"
         if (name == clickKey) {
             if (down && (event == null || event.repeatCount == 0)) leftButtonDown()
             if (!down) leftButtonUp()
             return true
         }
-        val actionId = config.gamepadMap[name] ?: return false
+        val actionId = cfg.gamepadMap[name] ?: return false
         val action = Action.fromId(actionId)
         if (down && (event == null || event.repeatCount == 0)) {
+            // 消抖：双通道可能重复送达同一按键，250ms 内同动作只执行一次
+            val now = System.currentTimeMillis()
+            if (now - lastKeyActionTime < 250 && lastKeyAction == action) return true
+            lastKeyActionTime = now
+            lastKeyAction = action
             if (action == Action.NOOP) return true
             if (action == Action.TOGGLE_MOUSE) toggleMouse()
             else execute(action)
@@ -1050,19 +1090,20 @@ class OverlayController(private val service: GestureAccessibilityService) {
         }
 
         // 4) 右摇杆 → 链式滚动（参考应用方案）
-        //    派发一个 150ms 滑动，完成回调后立即派发下一个 → 连续无间隙的滚动流；
+        //    派发一个滑动，完成回调后立即派发下一个 → 连续无间隙的滚动流；
         //    方向跟随摇杆（摇杆向下=手指上滑=页面下滚），长度随推杆幅度与滚动速度设置变化
         val scrollLen = hypot(scrollX, scrollY)
-        if (scrollLen > dead && !leftHeld && !scrollGestureBusy) {
-            // 手势被取消后退避 500ms：避免与真实触摸形成"派发-取消"风暴（会导致服务被系统杀掉）
-            if (now - lastScrollCancel < 500) return
-            val norm = ((scrollLen - dead) / (1f - dead)).coerceIn(0f, 1f)
-            val len = (cfg.scrollStep * cfg.scrollSpeed / 100f * (0.5f + norm * 0.6f)).coerceAtLeast(60f)
+        val scrollDead = dead * 0.5f // 滚动比移动更灵敏（轻推即可滚动）
+        if (scrollLen > scrollDead && !leftHeld && !scrollGestureBusy) {
+            // 手势被取消后退避 300ms：避免与真实触摸形成"派发-取消"风暴
+            if (now - lastScrollCancel < 300) return
+            val norm = ((scrollLen - scrollDead) / (1f - scrollDead)).coerceIn(0f, 1f)
+            val len = (cfg.scrollStep * cfg.scrollSpeed / 100f * (0.8f + norm * 0.5f)).coerceAtLeast(120f)
             val dirX = scrollX / scrollLen
             val dirY = scrollY / scrollLen
             scrollGestureBusy = true
             lastActivity = now
-            val dispatched = s.swipe(cursorX, cursorY, cursorX - dirX * len, cursorY - dirY * len, 150) { ok ->
+            val dispatched = s.swipe(cursorX, cursorY, cursorX - dirX * len, cursorY - dirY * len, 130) { ok ->
                 if (!ok) lastScrollCancel = System.currentTimeMillis()
                 scrollGestureBusy = false
             }

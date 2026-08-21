@@ -36,6 +36,18 @@ class GamepadInputView(context: Context, private val controller: OverlayControll
         return consumed || super.onGenericMotionEvent(event)
     }
 
+    /** 按键主通道（焦点窗路径，本设备实测可靠）：
+     *  映射到的键消费；未映射/未激活时的非唤出键返回 false，事件回落给应用。 */
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (isGamepadSource(event) && controller.onGamepadKey(keyCode, true, event)) return true
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (isGamepadSource(event) && controller.onGamepadKey(keyCode, false, event)) return true
+        return super.onKeyUp(keyCode, event)
+    }
+
     /**
      * 触摸到屏幕其他位置（FLAG_WATCH_OUTSIDE_TOUCH）：
      * 上报给控制器——手指控制时自动收起鼠标（用户要求；也避免注入手势与真实触摸互相打断）。
