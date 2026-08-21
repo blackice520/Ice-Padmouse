@@ -15,7 +15,7 @@ import kotlin.math.hypot
  */
 class JoystickView(context: Context) : View(context) {
 
-    var onMove: ((dx: Float, dy: Float) -> Unit)? = null
+    var onMove: ((defX: Float, defY: Float) -> Unit)? = null
     var onTap: (() -> Unit)? = null
     var onPress: (() -> Unit)? = null
     var onRelease: (() -> Unit)? = null
@@ -80,18 +80,17 @@ class JoystickView(context: Context) : View(context) {
                 val idx = e.findPointerIndex(pointerId)
                 if (idx >= 0) {
                     val maxR = width / 2f - knobR - 4f * density
-                    var dx = e.getX(idx) - downX
-                    var dy = e.getY(idx) - downY
-                    val len = hypot(dx, dy)
-                    if (len > maxR) {
-                        dx = dx / len * maxR
-                        dy = dy / len * maxR
-                    }
-                    val px = knobX
-                    val py = knobY
-                    knobX = dx
-                    knobY = dy
-                    onMove?.invoke(knobX - px, knobY - py)
+                    val rawX = e.getX(idx) - downX
+                    val rawY = e.getY(idx) - downY
+                    val len = hypot(rawX, rawY)
+                    // 摇杆帽位置钳制在盘内（仅绘制用）
+                    val kx = if (len > maxR) rawX / len * maxR else rawX
+                    val ky = if (len > maxR) rawY / len * maxR else rawY
+                    knobX = kx
+                    knobY = ky
+                    // 上报"归一化偏转"(-1..1)：主循环按偏转持续移动光标，
+                    // 推住摇杆帽停在边缘时偏转保持 → 光标持续移动（速度模型，同物理手柄）
+                    onMove?.invoke(kx / maxR, ky / maxR)
                     invalidate()
                 }
             }

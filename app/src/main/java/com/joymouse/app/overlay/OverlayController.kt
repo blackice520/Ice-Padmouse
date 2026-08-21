@@ -86,7 +86,6 @@ class OverlayController(private val service: GestureAccessibilityService) {
     var mode = Mode.MOVE
     private var panelVisible = true
     private var cursorVisible = true
-    private var scrollAccum = 0f
     private var dragging = false
     private var lastConfigSave = 0L
 
@@ -95,9 +94,12 @@ class OverlayController(private val service: GestureAccessibilityService) {
     var mouseActive = true
         private set
 
-    /** 左摇杆速度向量（归一化，未经过死区处理，由 tick 处理） */
+    /** 左摇杆速度向量（物理手柄，归一化，由 tick 处理） */
     private var stickX = 0f
     private var stickY = 0f
+    /** 虚拟摇杆偏转向量（面板摇杆，-1..1，由 tick 处理） */
+    private var vJoyX = 0f
+    private var vJoyY = 0f
     /** 右摇杆滚动方向向量 */
     private var scrollX = 0f
     private var scrollY = 0f
@@ -379,7 +381,11 @@ class OverlayController(private val service: GestureAccessibilityService) {
         // 摇杆
         val stick = JoystickView(ctx)
         stick.layoutParams = LinearLayout.LayoutParams(dp(92), dp(92))
-        stick.onMove = ::onJoystickMove
+        // 速度模型：摇杆偏转(-1..1)由 60fps 主循环持续移动光标
+        stick.onMove = { dx, dy ->
+            vJoyX = dx
+            vJoyY = dy
+        }
         stick.onTap = { if (mode == Mode.MOVE) execute(Action.CLICK) }
         stick.onPress = {
             joystickTouched = true
@@ -389,6 +395,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
         stick.onRelease = {
             joystickTouched = false
             onOurTouch(false)
+            vJoyX = 0f
+            vJoyY = 0f
             if (mode == Mode.DRAG) endDrag()
         }
         joystick = stick
@@ -537,19 +545,6 @@ class OverlayController(private val service: GestureAccessibilityService) {
 
     // ================= 摇杆行为 =================
 
-    private fun onJoystickMove(dx: Float, dy: Float) {
-        if (editMode) return
-        nudgeCursor()
-        when (mode) {
-            Mode.MOVE -> moveCursor(dx * config.cursorSpeed, dy * config.cursorSpeed)
-            Mode.DRAG -> {
-                moveCursor(dx * config.cursorSpeed, dy * config.cursorSpeed)
-                if (dragging) service.dragMove(cursorX, cursorY)
-            }
-            Mode.SCROLL -> accumulateScroll(dy)
-        }
-    }
-
     private fun moveCursor(dx: Float, dy: Float) {
         cursorX += dx
         cursorY += dy
@@ -571,19 +566,6 @@ class OverlayController(private val service: GestureAccessibilityService) {
     private fun endDrag() {
         dragging = false
         service.dragEnd(cursorX, cursorY)
-    }
-
-    private fun accumulateScroll(dy: Float) {
-        scrollAccum += dy
-        val threshold = 36 * density
-        while (scrollAccum >= threshold) {
-            scrollAccum -= threshold
-            service.scrollAt(cursorX, cursorY, config.scrollStep, up = false)
-        }
-        while (scrollAccum <= -threshold) {
-            scrollAccum += threshold
-            service.scrollAt(cursorX, cursorY, config.scrollStep, up = true)
-        }
     }
 
     // ================= 动作执行 =================
@@ -915,7 +897,40 @@ class OverlayController(private val service: GestureAccessibilityService) {
             lastActivity = now
         }
 
-        // 2) 左键状态机：移动超阈值或静止超 500ms 转拖拽
+        // 2) 虚拟摇杆（面板）→ 光标速度（速度模型：偏转持续生效，推住不放光标一直走）
+        if (!editMode) {
+            val vDead = 0.06f
+            val vLen = hypot(vJoyX, vJoyY)
+            if (vLen > vDead && (mode == Mode.MOVE || mode == Mode.DRAG)) {
+                val norm = ((vLen - vDead) / (1f - vDead)).coerceIn(0f, 1f)
+                // smoothstep 曲线：起步柔和、推满线性，手感顺滑
+                val v = norm * norm * (3f - 2f * norm)
+                val speedPx = cfg.cursorSpeed * 3f * density * 16f // 每 tick 位移
+                val dx = (vJoyX / vLen) * v * speedPx
+                val dy = (vJoyY / vLen) * v * speedPx
+                moveCursorBy(dx, dy)
+                lastActivity = now
+            }
+            // 虚拟摇杆拖拽模式：拖动链跟随光标（节流 40ms）
+            if (mode == Mode.DRAG && dragging) {
+                val g = GestureAccessibilityService.instance
+                if (g != null && now - lastDragMoveTime > 40) {
+                    lastDragMoveTime = now
+                    g.dragMove(cursorX, cursorY)
+                }
+            }
+            // 虚拟摇杆滚轮模式：垂直偏转 → 滚动
+            if (mode == Mode.SCROLL && kotlin.math.abs(vJoyY) > 0.35f && !leftHeld) {
+                if (now - lastScrollTime > 150) {
+                    lastScrollTime = now
+                    val step = (cfg.scrollStep * cfg.scrollSpeed / 100f).toInt().coerceAtLeast(80)
+                    s.scrollAt(cursorX, cursorY, step, up = vJoyY < 0)
+                    lastActivity = now
+                }
+            }
+        }
+
+        // 3) 左键状态机：移动超阈值或静止超 500ms 转拖拽
         if (leftHeld && !leftDragging) {
             val moved = hypot(cursorX - pressX, cursorY - pressY) > 6f * density
             val heldLong = now - pressTime > 500
@@ -932,7 +947,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
             }
         }
 
-        // 3) 右摇杆 → 滚动（每 200ms 一次）
+        // 4) 右摇杆 → 滚动（每 200ms 一次）
         val scrollLen = hypot(scrollX, scrollY)
         if (scrollLen > dead && !leftHeld) {
             if (now - lastScrollTime > 200) {
@@ -943,7 +958,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
             }
         }
 
-        // 4) 空闲超时自动关闭鼠标
+        // 5) 空闲超时自动关闭鼠标
         if (cfg.mouseTimeout > 0 && now - lastActivity > cfg.mouseTimeout * 1000L) {
             toggleMouse()
         }
