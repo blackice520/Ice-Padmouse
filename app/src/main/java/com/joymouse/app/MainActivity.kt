@@ -3,7 +3,9 @@ package com.joymouse.app
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
 import android.view.View
 import android.view.accessibility.AccessibilityManager
@@ -71,6 +73,14 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<Button>(R.id.btnAccess).setOnClickListener {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        }
+        findViewById<Button>(R.id.btnBattery).setOnClickListener {
+            startActivity(
+                Intent(
+                    Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    Uri.parse("package:$packageName")
+                )
+            )
         }
         findViewById<Button>(R.id.btnTogglePanel).setOnClickListener { togglePanel() }
         findViewById<Button>(R.id.btnEditLayout).setOnClickListener { toggleEdit() }
@@ -191,8 +201,19 @@ class MainActivity : AppCompatActivity() {
         tvAccess.setTextColor(
             if (accessOn) getColor(R.color.status_on) else getColor(R.color.status_off)
         )
+        val batteryOn = batteryExempt()
+        val tvBattery = findViewById<TextView>(R.id.tvBatteryStatus)
+        tvBattery.text = if (batteryOn) "● 已在白名单" else "○ 未加入白名单"
+        tvBattery.setTextColor(
+            if (batteryOn) getColor(R.color.status_on) else getColor(R.color.status_off)
+        )
         findViewById<Button>(R.id.btnTogglePanel).text =
             if (OverlayController.instance?.panelVisible() == true) "隐藏悬浮控制台" else "显示悬浮控制台"
+    }
+
+    private fun batteryExempt(): Boolean {
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        return pm.isIgnoringBatteryOptimizations(packageName)
     }
 
     private fun isAccessibilityEnabled(): Boolean {
