@@ -282,9 +282,20 @@ class OverlayController(private val service: GestureAccessibilityService) {
         }
     }
 
+    /** 光标显示/隐藏：与鼠标激活状态联动（光标可见 = 鼠标激活 = 摇杆可用） */
     fun toggleCursor() {
-        if (cursorVisible) hideCursor() else showCursor()
-        cursorVisible = cursor != null
+        if (cursorVisible) {
+            hideCursor()
+            cursorVisible = false
+        } else {
+            if (!mouseActive) {
+                mouseActive = true
+                activateGamepadFocus()
+            }
+            showCursor()
+            cursorVisible = true
+            refreshModeButtons()
+        }
     }
 
     private fun updateCursor() {
@@ -390,6 +401,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
         stick.onPress = {
             joystickTouched = true
             onOurTouch(true)
+            // 鼠标未激活时按摇杆自动唤醒（保证摇杆永远可用）
+            if (!mouseActive) toggleMouse()
             if (mode == Mode.DRAG) startDrag()
         }
         stick.onRelease = {
@@ -691,8 +704,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
             gamepadParams = baseParams(1, 1).apply {
                 flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
                 x = 0
                 y = 0
             }
@@ -712,7 +724,11 @@ class OverlayController(private val service: GestureAccessibilityService) {
         gamepadParams = null
     }
 
-    /** 唤出/关闭鼠标（L3 或面板按钮触发）。唤出过程绝不派发任何手势。 */
+    /**
+     * 唤出/关闭鼠标（L3 或面板"鼠标"按钮触发）。唤出过程绝不派发任何手势。
+     * 注意：参考应用的"触摸屏幕自动休眠鼠标"已移除——虚拟控制台用户碰一下
+     * 应用界面鼠标就没了、摇杆失灵，体验灾难。鼠标只由 L3/按钮/空闲超时(默认关)控制。
+     */
     fun toggleMouse() {
         mouseActive = !mouseActive
         if (mouseActive) {
@@ -729,44 +745,6 @@ class OverlayController(private val service: GestureAccessibilityService) {
         }
         refreshModeButtons()
         haptic()
-    }
-
-    /** 触摸休眠冷却：鼠标刚关闭 1.5 秒内忽略触摸，避免反复开关 */
-    private var lastOutsideDismiss = 0L
-
-    /**
-     * 屏幕其他位置被触摸（焦点窗 ACTION_OUTSIDE）。
-     * 与参考应用一致：触摸屏幕任意非本应用区域 → 鼠标自动休眠（让出触摸给应用），
-     * 再次按 L3 唤出。触摸本应用窗口（控制台/按键/编辑面板）不会触发休眠。
-     */
-    fun onOutsideTouch(x: Float, y: Float) {
-        if (!mouseActive || editMode) return
-        if (leftHeld || dragging) return
-        val now = System.currentTimeMillis()
-        if (now - lastOutsideDismiss < 1500) return
-        if (now - lastActivity < 300) return
-        if (isTouchOnOurWindows(x, y)) return
-        lastOutsideDismiss = now
-        toggleMouse()
-    }
-
-    /** 触摸点是否落在我们自己的交互窗口上（控制台/编辑栏/选择面板/自定义按键） */
-    fun isTouchOnOurWindows(x: Float, y: Float): Boolean =
-        ourWindowRects().any { x >= it.left && x <= it.right && y >= it.top && y <= it.bottom }
-
-    /** 本应用全部交互窗口的屏幕矩形 */
-    private fun ourWindowRects(): List<android.graphics.Rect> {
-        val rects = mutableListOf<android.graphics.Rect>()
-        panelParams?.let { rects.add(android.graphics.Rect(it.x, it.y, it.x + it.width, it.y + it.height)) }
-        editBarParams?.let { rects.add(android.graphics.Rect(it.x, it.y, it.x + it.width, it.y + it.height)) }
-        picker.windowRect()?.let { rects.add(it) }
-        config.buttons.forEach { b ->
-            val size = dp(b.sizeDp)
-            val l = (b.x * screenW - size / 2f).toInt()
-            val t = (b.y * screenH - size / 2f).toInt()
-            rects.add(android.graphics.Rect(l, t, l + size, t + size))
-        }
-        return rects
     }
 
     /** 手柄摇杆轴事件（来自 GamepadInputView） */

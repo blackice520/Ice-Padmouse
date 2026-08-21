@@ -9,7 +9,6 @@ import android.media.AudioManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.provider.Settings
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import com.joymouse.app.config.Action
@@ -35,8 +34,8 @@ class GestureAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
-        // 无障碍服务启动后自动拉起悬浮控制台（需已授予悬浮窗权限）
-        if (OverlayController.instance == null && Settings.canDrawOverlays(this)) {
+        // 无障碍服务启动后自动拉起悬浮控制台（无障碍窗口类型，无需悬浮窗权限）
+        if (OverlayController.instance == null) {
             OverlayController(this).show()
         }
     }
