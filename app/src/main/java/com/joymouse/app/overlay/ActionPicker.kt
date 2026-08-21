@@ -42,6 +42,9 @@ class ActionPicker(private val controller: OverlayController) {
         }
         col.addView(header("编辑按键：${btn.label}（当前：${btn.action.label}）"))
 
+        // 取消：放在顶部，避免屏幕底部手势条遮挡导致点不到
+        col.addView(row("取消") { hide() })
+
         // 尺寸调节
         val sizeRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -70,9 +73,6 @@ class ActionPicker(private val controller: OverlayController) {
         scroll.addView(list)
         col.addView(scroll, LinearLayout.LayoutParams(controller.dp(190), 0, 1f))
 
-        // 取消：不做任何修改关闭面板
-        col.addView(row("取消") { hide() })
-
         val w = controller.dp(200)
         val h = (360 * density).toInt()
         params = WindowManager.LayoutParams(
@@ -88,7 +88,8 @@ class ActionPicker(private val controller: OverlayController) {
             var px = (btn.x * controller.screenW).toInt() + controller.dp(60)
             var py = (btn.y * controller.screenH).toInt() - h / 2
             px = px.coerceIn(controller.dp(4), controller.screenW - w - controller.dp(4))
-            py = py.coerceIn(controller.dp(4), controller.screenH - h - controller.dp(4))
+            // 底部留出导航条空间，保证"取消/删除"按钮不会被手势条遮挡
+            py = py.coerceIn(controller.dp(4), controller.screenH - h - controller.dp(56))
             x = px
             y = py
         }

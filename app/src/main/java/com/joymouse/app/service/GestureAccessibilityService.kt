@@ -103,37 +103,46 @@ class GestureAccessibilityService : AccessibilityService() {
     }
 
     /** 单击（默认 80ms 点击） */
-    fun tap(x: Float, y: Float, durationMs: Long = 80) {
-        dispatch(GestureDescription.Builder().addStroke(StrokeDescription(pointPath(x, y), 0, durationMs)))
+    fun tap(x: Float, y: Float, durationMs: Long = 80, onResult: ((Boolean) -> Unit)? = null) {
+        dispatch(GestureDescription.Builder().addStroke(StrokeDescription(pointPath(x, y), 0, durationMs)), onResult)
     }
 
-    /** 双击 */
-    fun doubleTap(x: Float, y: Float) {
-        tap(x, y, 70)
-        handler.postDelayed({ tap(x, y, 70) }, 130)
+    /** 双击（两次点击，结果取第二次） */
+    fun doubleTap(x: Float, y: Float, onResult: ((Boolean) -> Unit)? = null) {
+        tap(x, y, 70) { ok1 ->
+            if (ok1) {
+                tap(x, y, 70) { ok2 -> onResult?.invoke(ok2) }
+            } else {
+                onResult?.invoke(false)
+            }
+        }
     }
 
     /** 长按（作为右键的模拟） */
-    fun longPress(x: Float, y: Float, durationMs: Long = 600) {
-        dispatch(GestureDescription.Builder().addStroke(StrokeDescription(pointPath(x, y), 0, durationMs)))
+    fun longPress(x: Float, y: Float, durationMs: Long = 600, onResult: ((Boolean) -> Unit)? = null) {
+        dispatch(GestureDescription.Builder().addStroke(StrokeDescription(pointPath(x, y), 0, durationMs)), onResult)
     }
 
     /** 单次滑动（down->move->up 一个手势完成）。端点限制在屏幕内（Path 不允许负坐标） */
-    fun swipe(x1: Float, y1: Float, x2: Float, y2: Float, durationMs: Long = 280) {
+    fun swipe(
+        x1: Float, y1: Float, x2: Float, y2: Float,
+        durationMs: Long = 280,
+        onResult: ((Boolean) -> Unit)? = null
+    ) {
         val fx1 = x1.coerceAtLeast(0f)
         val fy1 = y1.coerceAtLeast(0f)
         val fx2 = x2.coerceAtLeast(0f)
         val fy2 = y2.coerceAtLeast(0f)
-        dispatch(GestureDescription.Builder().addStroke(StrokeDescription(linePath(fx1, fy1, fx2, fy2), 0, durationMs)))
+        dispatch(GestureDescription.Builder().addStroke(StrokeDescription(linePath(fx1, fy1, fx2, fy2), 0, durationMs)), onResult)
     }
 
     /** 向下滚动 = 手指向上滑 */
-    fun scrollAt(x: Float, y: Float, distancePx: Int, up: Boolean) {
+    fun scrollAt(x: Float, y: Float, distancePx: Int, up: Boolean, onResult: ((Boolean) -> Unit)? = null) {
         val d = distancePx.toFloat()
         val sx = x.coerceAtLeast(0f)
         val sy = y.coerceAtLeast(0f)
-        if (up) swipe(sx, sy, sx, sy - d, 260)
-        else swipe(sx, sy, sx, sy + d, 260)
+        if (up) swipe(sx, sy, sx, sy - d, 260, onResult)
+        else swipe(sx, sy, sx, sy + d, 260, onResult)
     }
 
     // ---------------- 连续拖拽（按住-移动-松开） ----------------

@@ -114,6 +114,12 @@ class OverlayController(private val service: GestureAccessibilityService) {
     /** 连续拖拽链（复用服务的链式拖拽） */
     private var chainActive = false
 
+    /** 手指是否按在虚拟摇杆上（真实触摸会打断注入手势，需等抬起后再注入点击） */
+    private var joystickTouched = false
+    private var pendingClickX = 0f
+    private var pendingClickY = 0f
+    private var pendingClickActive = false
+
     private val tickHandler = Handler(Looper.getMainLooper())
     private val tickRunnable = object : Runnable {
         override fun run() {
@@ -350,8 +356,15 @@ class OverlayController(private val service: GestureAccessibilityService) {
         stick.layoutParams = LinearLayout.LayoutParams(dp(92), dp(92))
         stick.onMove = ::onJoystickMove
         stick.onTap = { if (mode == Mode.MOVE) execute(Action.CLICK) }
-        stick.onPress = { if (mode == Mode.DRAG) startDrag() }
-        stick.onRelease = { if (mode == Mode.DRAG) endDrag() }
+        stick.onPress = {
+            joystickTouched = true
+            if (mode == Mode.DRAG) startDrag()
+        }
+        stick.onRelease = {
+            joystickTouched = false
+            if (mode == Mode.DRAG) endDrag()
+            flushPendingClick()
+        }
         joystick = stick
         p.addView(stick)
 
@@ -530,21 +543,72 @@ class OverlayController(private val service: GestureAccessibilityService) {
 
     // ================= 动作执行 =================
 
+    /**
+     * 可靠注入：等 60ms（让真实触摸流收尾）再注入；
+     * 若被系统取消（例如另一根手指还按在屏幕上），180ms 后自动重试，最多 3 次。
+     */
+    private fun injectWithRetry(dispatch: (onResult: (Boolean) -> Unit) -> Unit) {
+        var attempts = 0
+        val task = object : Runnable {
+            override fun run() {
+                if (attempts >= 3) return
+                attempts++
+                dispatch { ok ->
+                    if (!ok && attempts < 3) {
+                        tickHandler.postDelayed(this, 180)
+                    }
+                }
+            }
+        }
+        tickHandler.postDelayed(task, 60)
+    }
+
+    /** 摇杆上的手指抬起后补发被挂起的点击 */
+    private fun flushPendingClick() {
+        if (!pendingClickActive) return
+        pendingClickActive = false
+        injectWithRetry { cb -> GestureAccessibilityService.instance?.tap(pendingClickX, pendingClickY, onResult = cb) }
+    }
+
+    /** 左键单击：若另一根手指按在摇杆上，挂起等摇杆抬起再注入（避免被真实触摸打断） */
+    private fun doClick(tx: Float, ty: Float) {
+        if (joystickTouched) {
+            pendingClickX = tx
+            pendingClickY = ty
+            pendingClickActive = true
+        } else {
+            injectWithRetry { cb -> GestureAccessibilityService.instance?.tap(tx, ty, onResult = cb) }
+        }
+        haptic()
+    }
+
     fun execute(action: Action) {
         val s = GestureAccessibilityService.instance ?: return
         lastActivity = System.currentTimeMillis()
         // 光标若停在本应用悬浮窗上，自动挪到最近空白处（避免点击被自己吞掉/触发悬浮键）
         val (tx, ty) = freeCursorTarget()
         when (action) {
-            Action.CLICK -> { s.tap(tx, ty); haptic() }
-            Action.DOUBLE_CLICK -> { s.doubleTap(tx, ty); haptic() }
-            Action.LONG_PRESS -> { s.longPress(tx, ty); haptic() }
-            Action.SWIPE_UP -> s.swipe(tx, ty, tx, ty - dp(180).toFloat(), 300)
-            Action.SWIPE_DOWN -> s.swipe(tx, ty, tx, ty + dp(180).toFloat(), 300)
-            Action.SWIPE_LEFT -> s.swipe(tx, ty, tx - dp(180).toFloat(), ty, 300)
-            Action.SWIPE_RIGHT -> s.swipe(tx, ty, tx + dp(180).toFloat(), ty, 300)
-            Action.SCROLL_UP -> s.scrollAt(tx, ty, config.scrollStep, up = true)
-            Action.SCROLL_DOWN -> s.scrollAt(tx, ty, config.scrollStep, up = false)
+            Action.CLICK -> doClick(tx, ty)
+            Action.DOUBLE_CLICK -> {
+                if (joystickTouched) doClick(tx, ty) // 简化：按住摇杆时双击降级为单击，抬起后补发
+                else {
+                    injectWithRetry { cb -> s.doubleTap(tx, ty, onResult = cb) }
+                    haptic()
+                }
+            }
+            Action.LONG_PRESS -> {
+                if (joystickTouched) doClick(tx, ty)
+                else {
+                    injectWithRetry { cb -> s.longPress(tx, ty, onResult = cb) }
+                    haptic()
+                }
+            }
+            Action.SWIPE_UP -> injectWithRetry { cb -> s.swipe(tx, ty, tx, ty - dp(180).toFloat(), 300, cb) }
+            Action.SWIPE_DOWN -> injectWithRetry { cb -> s.swipe(tx, ty, tx, ty + dp(180).toFloat(), 300, cb) }
+            Action.SWIPE_LEFT -> injectWithRetry { cb -> s.swipe(tx, ty, tx - dp(180).toFloat(), ty, 300, cb) }
+            Action.SWIPE_RIGHT -> injectWithRetry { cb -> s.swipe(tx, ty, tx + dp(180).toFloat(), ty, 300, cb) }
+            Action.SCROLL_UP -> injectWithRetry { cb -> s.scrollAt(tx, ty, config.scrollStep, up = true, onResult = cb) }
+            Action.SCROLL_DOWN -> injectWithRetry { cb -> s.scrollAt(tx, ty, config.scrollStep, up = false, onResult = cb) }
             Action.MUTE -> {
                 (ctx.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager)
                     ?.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.ADJUST_MUTE, 0)
@@ -754,7 +818,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
         } else {
             val s = GestureAccessibilityService.instance ?: return
             val (tx, ty) = freeCursorTarget()
-            s.tap(tx, ty)
+            injectWithRetry { cb -> s.tap(tx, ty, onResult = cb) }
             haptic()
         }
     }
