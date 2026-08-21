@@ -30,6 +30,15 @@ class ActionPicker(private val controller: OverlayController) {
             background = controller.roundedDrawable(Color.argb(250, 245, 245, 245), 14f)
             elevation = 12f * density
             setPadding(controller.dp(4), controller.dp(4), controller.dp(4), controller.dp(4))
+            // 点面板外部任意位置 = 取消
+            setOnTouchListener { _, e ->
+                if (e.actionMasked == android.view.MotionEvent.ACTION_OUTSIDE) {
+                    hide()
+                    true
+                } else {
+                    false
+                }
+            }
         }
         col.addView(header("编辑按键：${btn.label}（当前：${btn.action.label}）"))
 
@@ -61,6 +70,9 @@ class ActionPicker(private val controller: OverlayController) {
         scroll.addView(list)
         col.addView(scroll, LinearLayout.LayoutParams(controller.dp(190), 0, 1f))
 
+        // 取消：不做任何修改关闭面板
+        col.addView(row("取消") { hide() })
+
         val w = controller.dp(200)
         val h = (360 * density).toInt()
         params = WindowManager.LayoutParams(
@@ -68,7 +80,8 @@ class ActionPicker(private val controller: OverlayController) {
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
             android.graphics.PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START

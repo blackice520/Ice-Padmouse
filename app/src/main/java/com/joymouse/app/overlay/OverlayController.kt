@@ -67,6 +67,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
     private var editBarParams: WindowManager.LayoutParams? = null
     internal val buttonViews = LinkedHashMap<Long, MappedButtonView>()
     private val modeButtons = mutableMapOf<Mode, TextView>()
+    private var editKeyView: TextView? = null
+    private var buttonsKeyView: TextView? = null
     internal val picker = ActionPicker(this)
 
     /** 手柄输入焦点捕获窗（1×1 可聚焦无障碍窗口，位于 (0,0)） */
@@ -271,7 +273,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
 
     private fun addPanelWindow() {
         val p = panel ?: return
-        val w = (110 * density).toInt()
+        val w = (118 * density).toInt()
         val defaultX = dp(10)
         val defaultY = (screenH / 2 - 150 * density).toInt().coerceAtLeast(dp(10))
         val useX = if (config.panelX >= 0f) (config.panelX * screenW).toInt() else defaultX
@@ -351,17 +353,20 @@ class OverlayController(private val service: GestureAccessibilityService) {
         val scrollKey = modeKey("滚轮", Mode.SCROLL)
         modeButtons[Mode.DRAG] = dragKey
         modeButtons[Mode.SCROLL] = scrollKey
+        val editKey = panelKey("编辑") { setEditing(!editMode) }
+        editKeyView = editKey
         p.addView(rowOf(
             dragKey,
             scrollKey,
-            panelKey("编辑") { setEditing(!editMode) },
+            editKey,
         ))
-        // 第三行：鼠标开关 / 光标开关 / 隐藏控制台
-        p.addView(rowOf(
-            panelKey("鼠标") { toggleMouse() },
-            panelKey("光标") { toggleCursor() },
-            panelKey("隐藏") { hidePanel() },
-        ))
+        // 第三行：鼠标开关 / 自定义按键显隐 / 光标开关 / 隐藏控制台
+        val mouseKey = panelKey("鼠标") { toggleMouse() }
+        val buttonsKey = panelKey("按键") { setButtonsVisible(!config.buttonsVisible) }.apply { textSize = 9.5f }
+        buttonsKeyView = buttonsKey
+        val cursorKey = panelKey("光标") { toggleCursor() }.apply { textSize = 9.5f }
+        val hideKey = panelKey("隐藏") { hidePanel() }.apply { textSize = 9.5f }
+        p.addView(rowOf(mouseKey, buttonsKey, cursorKey, hideKey))
 
         panel = p
         refreshModeButtons()
@@ -416,6 +421,14 @@ class OverlayController(private val service: GestureAccessibilityService) {
                 if (mode == m) Color.argb(255, 0, 180, 110) else Color.argb(80, 255, 255, 255), 10f
             )
         }
+        setKeyState(editKeyView, editMode)
+        setKeyState(buttonsKeyView, config.buttonsVisible)
+    }
+
+    private fun setKeyState(v: TextView?, on: Boolean) {
+        v?.background = roundedDrawable(
+            if (on) Color.argb(255, 0, 180, 110) else Color.argb(80, 255, 255, 255), 10f
+        )
     }
 
     private fun onPanelGrab(e: MotionEvent): Boolean {
@@ -771,7 +784,22 @@ class OverlayController(private val service: GestureAccessibilityService) {
         config.buttons.forEach { addButtonWindow(it) }
     }
 
+    /** 自定义按键显隐开关（面板"按键"按钮） */
+    fun setButtonsVisible(on: Boolean) {
+        config.buttonsVisible = on
+        saveConfig()
+        if (on) {
+            rebuildButtons()
+        } else {
+            buttonViews.keys.toList().forEach { removeButtonWindow(it) }
+            buttonViews.clear()
+        }
+        refreshModeButtons()
+        haptic()
+    }
+
     private fun addButtonWindow(btn: MappedButton) {
+        if (!config.buttonsVisible) return
         if (buttonViews.containsKey(btn.id)) return
         val size = dp(btn.sizeDp)
         val view = MappedButtonView(ctx, btn, this)
@@ -828,6 +856,11 @@ class OverlayController(private val service: GestureAccessibilityService) {
         if (config.buttons.size >= 12) {
             Toast.makeText(ctx, "最多 12 个自定义按键", Toast.LENGTH_SHORT).show()
             return
+        }
+        // 添加按键时自动确保按键可见
+        if (!config.buttonsVisible) {
+            config.buttonsVisible = true
+            saveConfig()
         }
         val btn = MappedButton(
             id = System.currentTimeMillis(),

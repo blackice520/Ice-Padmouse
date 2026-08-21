@@ -64,6 +64,7 @@ data class AppConfig(
     var hapticEnabled: Boolean = true, // 触觉反馈
     var vibrationIntensity: Int = 255, // 振动强度 0..255
     var toggleKey: String = "l3",      // 唤出/关闭鼠标的手柄键
+    var buttonsVisible: Boolean = true,// 自定义按键是否显示
     var gamepadMap: MutableMap<String, String> = mutableMapOf(), // 手柄键名 -> 动作 id
     var buttons: MutableList<MappedButton> = mutableListOf()
 ) {
@@ -100,6 +101,7 @@ data class AppConfig(
             .put("hapticEnabled", hapticEnabled)
             .put("vibrationIntensity", vibrationIntensity)
             .put("toggleKey", toggleKey)
+            .put("buttonsVisible", buttonsVisible)
             .put("gamepadMap", gm)
             .put("buttons", arr)
     }
@@ -127,6 +129,7 @@ data class AppConfig(
                 cfg.hapticEnabled = o.optBoolean("hapticEnabled", true)
                 cfg.vibrationIntensity = o.optInt("vibrationIntensity", 255).coerceIn(0, 255)
                 cfg.toggleKey = o.optString("toggleKey", "l3")
+                cfg.buttonsVisible = o.optBoolean("buttonsVisible", true)
                 val gm = o.optJSONObject("gamepadMap")
                 if (gm != null) {
                     val it = gm.keys()

@@ -29,6 +29,7 @@ class AppConfigTest {
             hapticEnabled = false,
             vibrationIntensity = 128,
             toggleKey = "r3",
+            buttonsVisible = false,
             gamepadMap = mutableMapOf("a" to "click", "lb" to "mute"),
             buttons = mutableListOf(
                 MappedButton(42, "攻击", Action.CLICK, 0.8f, 0.7f, 64),
@@ -54,6 +55,7 @@ class AppConfigTest {
         assertFalse(round.hapticEnabled)
         assertEquals(128, round.vibrationIntensity)
         assertEquals("r3", round.toggleKey)
+        assertFalse(round.buttonsVisible)
         assertEquals("click", round.gamepadMap["a"])
         assertEquals("mute", round.gamepadMap["lb"])
 
