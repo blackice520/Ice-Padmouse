@@ -120,6 +120,10 @@ class OverlayController(private val service: GestureAccessibilityService) {
     private var scrollY = 0f
     /** 滚动手势链是否进行中（参考应用方案：手势完成回调后立即派发下一个，形成连续滚动流） */
     private var scrollGestureBusy = false
+    /** 滚动被取消/拒绝的时间（退避用） */
+    private var lastScrollCancel = 0L
+    /** 触摸休眠冷却：鼠标刚关闭 1.5 秒内忽略触摸，避免反复开关 */
+    private var lastOutsideDismiss = 0L
     /** 左键按下状态机：held=按下，dragging=已转拖拽 */
     private var leftHeld = false
     private var leftDragging = false
@@ -773,7 +777,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
             gamepadParams = baseParams(1, 1).apply {
                 flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
                 x = 0
                 y = 0
             }
@@ -818,6 +823,41 @@ class OverlayController(private val service: GestureAccessibilityService) {
         }
         refreshModeButtons()
         haptic()
+    }
+
+    /**
+     * 屏幕其他位置被触摸（焦点窗 ACTION_OUTSIDE）→ 自动收起鼠标（用户要求：手指控制时取消光标）。
+     * 触摸本应用窗口（控制台/按键/编辑面板）不会触发；刚操作完 300ms 内忽略；
+     * 关闭后 1.5s 冷却防反复。
+     */
+    fun onOutsideTouch(x: Float, y: Float) {
+        if (!mouseActive || editMode) return
+        if (leftHeld || dragging) return
+        val now = System.currentTimeMillis()
+        if (now - lastOutsideDismiss < 1500) return
+        if (now - lastActivity < 300) return
+        if (isTouchOnOurWindows(x, y)) return
+        lastOutsideDismiss = now
+        toggleMouse()
+    }
+
+    /** 触摸点是否落在我们自己的交互窗口上（控制台/编辑栏/选择面板/自定义按键） */
+    fun isTouchOnOurWindows(x: Float, y: Float): Boolean =
+        ourWindowRects().any { x >= it.left && x <= it.right && y >= it.top && y <= it.bottom }
+
+    /** 本应用全部交互窗口的屏幕矩形 */
+    private fun ourWindowRects(): List<android.graphics.Rect> {
+        val rects = mutableListOf<android.graphics.Rect>()
+        panelParams?.let { rects.add(android.graphics.Rect(it.x, it.y, it.x + it.width, it.y + it.height)) }
+        editBarParams?.let { rects.add(android.graphics.Rect(it.x, it.y, it.x + it.width, it.y + it.height)) }
+        picker.windowRect()?.let { rects.add(it) }
+        config.buttons.forEach { b ->
+            val size = dp(b.sizeDp)
+            val l = (b.x * screenW - size / 2f).toInt()
+            val t = (b.y * screenH - size / 2f).toInt()
+            rects.add(android.graphics.Rect(l, t, l + size, t + size))
+        }
+        return rects
     }
 
     /** 手柄摇杆轴事件（来自 GamepadInputView） */
@@ -1014,14 +1054,22 @@ class OverlayController(private val service: GestureAccessibilityService) {
         //    方向跟随摇杆（摇杆向下=手指上滑=页面下滚），长度随推杆幅度与滚动速度设置变化
         val scrollLen = hypot(scrollX, scrollY)
         if (scrollLen > dead && !leftHeld && !scrollGestureBusy) {
+            // 手势被取消后退避 500ms：避免与真实触摸形成"派发-取消"风暴（会导致服务被系统杀掉）
+            if (now - lastScrollCancel < 500) return
             val norm = ((scrollLen - dead) / (1f - dead)).coerceIn(0f, 1f)
             val len = (cfg.scrollStep * cfg.scrollSpeed / 100f * (0.5f + norm * 0.6f)).coerceAtLeast(60f)
             val dirX = scrollX / scrollLen
             val dirY = scrollY / scrollLen
             scrollGestureBusy = true
             lastActivity = now
-            s.swipe(cursorX, cursorY, cursorX - dirX * len, cursorY - dirY * len, 150) { ok ->
+            val dispatched = s.swipe(cursorX, cursorY, cursorX - dirX * len, cursorY - dirY * len, 150) { ok ->
+                if (!ok) lastScrollCancel = System.currentTimeMillis()
                 scrollGestureBusy = false
+            }
+            if (!dispatched) {
+                // 派发被拒绝：立即复位并退避，避免 busy 卡死导致滚动失效
+                scrollGestureBusy = false
+                lastScrollCancel = System.currentTimeMillis()
             }
         }
 

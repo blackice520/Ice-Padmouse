@@ -50,6 +50,7 @@ class GestureAccessibilityService : AccessibilityService() {
      * - 鼠标激活时：按键已由焦点捕获视图接收，这里不再重复处理
      */
     override fun onKeyEvent(event: KeyEvent): Boolean {
+        logKeyEvent(event)
         val c = OverlayController.instance
         if (c == null) return super.onKeyEvent(event)
         val src = event.source
@@ -71,6 +72,18 @@ class GestureAccessibilityService : AccessibilityService() {
         return c.onGamepadKey(event.keyCode, event.action != KeyEvent.ACTION_UP, event)
     }
 
+    /** 按键事件落盘（荣耀 logcat 加密，用于诊断按键是否到达服务） */
+    private fun logKeyEvent(event: KeyEvent) {
+        try {
+            val line = "${System.currentTimeMillis()} code=${event.keyCode} " +
+                "name=${ConfigStore.keyNameOf(event.keyCode) ?: "?"} " +
+                "src=${event.source} act=${event.action}\n"
+            java.io.FileOutputStream(java.io.File(filesDir, "keys.log"), true)
+                .use { it.write(line.toByteArray()) }
+        } catch (_: Throwable) {
+        }
+    }
+
     override fun onConfigurationChanged(config: android.content.res.Configuration) {
         super.onConfigurationChanged(config)
         OverlayController.instance?.onConfigurationChanged()
@@ -90,8 +103,8 @@ class GestureAccessibilityService : AccessibilityService() {
     private fun linePath(x1: Float, y1: Float, x2: Float, y2: Float): Path =
         Path().apply { moveTo(x1, y1); lineTo(x2, y2) }
 
-    private fun dispatch(builder: GestureDescription.Builder, onResult: ((Boolean) -> Unit)? = null) {
-        try {
+    private fun dispatch(builder: GestureDescription.Builder, onResult: ((Boolean) -> Unit)? = null): Boolean {
+        return try {
             dispatchGesture(
                 builder.build(),
                 object : GestureResultCallback() {
@@ -102,13 +115,13 @@ class GestureAccessibilityService : AccessibilityService() {
             )
         } catch (t: Throwable) {
             onResult?.invoke(false)
+            false
         }
     }
 
-    /** 单击（默认 80ms 点击） */
-    fun tap(x: Float, y: Float, durationMs: Long = 80, onResult: ((Boolean) -> Unit)? = null) {
+    /** 单击（默认 80ms 点击），返回是否成功派发 */
+    fun tap(x: Float, y: Float, durationMs: Long = 80, onResult: ((Boolean) -> Unit)? = null): Boolean =
         dispatch(GestureDescription.Builder().addStroke(StrokeDescription(pointPath(x, y), 0, durationMs)), onResult)
-    }
 
     /** 双击（两次点击，结果取第二次） */
     fun doubleTap(x: Float, y: Float, onResult: ((Boolean) -> Unit)? = null) {
@@ -122,21 +135,20 @@ class GestureAccessibilityService : AccessibilityService() {
     }
 
     /** 长按（作为右键的模拟） */
-    fun longPress(x: Float, y: Float, durationMs: Long = 600, onResult: ((Boolean) -> Unit)? = null) {
+    fun longPress(x: Float, y: Float, durationMs: Long = 600, onResult: ((Boolean) -> Unit)? = null): Boolean =
         dispatch(GestureDescription.Builder().addStroke(StrokeDescription(pointPath(x, y), 0, durationMs)), onResult)
-    }
 
     /** 单次滑动（down->move->up 一个手势完成）。端点限制在屏幕内（Path 不允许负坐标） */
     fun swipe(
         x1: Float, y1: Float, x2: Float, y2: Float,
         durationMs: Long = 280,
         onResult: ((Boolean) -> Unit)? = null
-    ) {
+    ): Boolean {
         val fx1 = x1.coerceAtLeast(0f)
         val fy1 = y1.coerceAtLeast(0f)
         val fx2 = x2.coerceAtLeast(0f)
         val fy2 = y2.coerceAtLeast(0f)
-        dispatch(GestureDescription.Builder().addStroke(StrokeDescription(linePath(fx1, fy1, fx2, fy2), 0, durationMs)), onResult)
+        return dispatch(GestureDescription.Builder().addStroke(StrokeDescription(linePath(fx1, fy1, fx2, fy2), 0, durationMs)), onResult)
     }
 
     /** 向下滚动 = 手指向上滑 */
