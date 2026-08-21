@@ -122,6 +122,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
     private var scrollGestureBusy = false
     /** 滚动被取消/拒绝的时间（退避用） */
     private var lastScrollCancel = 0L
+    /** 连续滚动次数：防止持续注入手势触发 MagicOS 无障碍看门狗（会导致应用被强制停止+服务被吊销） */
+    private var scrollChainCount = 0
     /** 触摸休眠冷却：鼠标刚关闭 1.5 秒内忽略触摸，避免反复开关 */
     private var lastOutsideDismiss = 0L
     /** 左键按下状态机：held=按下，dragging=已转拖拽 */
@@ -1133,11 +1135,15 @@ class OverlayController(private val service: GestureAccessibilityService) {
         if (scrollLen > scrollDead && !leftHeld && !scrollGestureBusy) {
             // 手势被取消后退避 300ms：避免与真实触摸形成"派发-取消"风暴
             if (now - lastScrollCancel < 300) return
+            // 连续注入保护：连续 12 次手势（约 2.5 秒）后暂停，需摇杆回中恢复。
+            // 防止持续注入触发系统无障碍看门狗（应用会被强制停止并吊销服务）
+            if (scrollChainCount >= 12) return
             val norm = ((scrollLen - scrollDead) / (1f - scrollDead)).coerceIn(0f, 1f)
             val len = (cfg.scrollStep * cfg.scrollSpeed / 100f * (0.8f + norm * 0.5f)).coerceAtLeast(120f)
             val dirX = scrollX / scrollLen
             val dirY = scrollY / scrollLen
             scrollGestureBusy = true
+            scrollChainCount++
             lastActivity = now
             val dispatched = s.swipe(cursorX, cursorY, cursorX - dirX * len, cursorY - dirY * len, 130) { ok ->
                 if (!ok) lastScrollCancel = System.currentTimeMillis()
@@ -1148,6 +1154,9 @@ class OverlayController(private val service: GestureAccessibilityService) {
                 scrollGestureBusy = false
                 lastScrollCancel = System.currentTimeMillis()
             }
+        } else {
+            // 摇杆回中/松开 → 重置连续计数
+            scrollChainCount = 0
         }
 
         // 5) 空闲超时自动关闭鼠标

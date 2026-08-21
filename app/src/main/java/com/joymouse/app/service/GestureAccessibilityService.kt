@@ -34,6 +34,13 @@ class GestureAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        // 启动标记：验证按键日志写入路径是否可用
+        try {
+            java.io.FileOutputStream(java.io.File(filesDir, "keys.log"), true).use {
+                it.write("${System.currentTimeMillis()} service connected\n".toByteArray())
+            }
+        } catch (_: Throwable) {
+        }
         // 无障碍服务启动后自动拉起悬浮控制台（无障碍窗口类型，无需悬浮窗权限）
         if (OverlayController.instance == null) {
             OverlayController(this).show()
