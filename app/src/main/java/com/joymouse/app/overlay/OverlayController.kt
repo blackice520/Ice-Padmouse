@@ -256,13 +256,22 @@ class OverlayController(private val service: GestureAccessibilityService) {
     fun toggleMediaPlayPause() {
         try {
             val msm = ctx.getSystemService(Context.MEDIA_SESSION_SERVICE) as? android.media.session.MediaSessionManager ?: return
-            val session = msm.getActiveSessions(null).firstOrNull {
+            val sessions = msm.getActiveSessions(null)
+            // 优先正在播放的会话，其次任意非 NONE 状态的会话
+            val playing = sessions.firstOrNull {
+                it.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
+            }
+            val session = playing ?: sessions.firstOrNull {
                 it.playbackState?.state?.let { s ->
                     s != android.media.session.PlaybackState.STATE_NONE
                 } == true
-            } ?: return
-            val playing = session.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
-            if (playing) session.transportControls.pause()
+            }
+            if (session == null) {
+                android.util.Log.w("JoyMouse", "播放/暂停：未找到活跃媒体会话（请先播放音乐/视频）")
+                return
+            }
+            val isPlaying = session.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
+            if (isPlaying) session.transportControls.pause()
             else session.transportControls.play()
         } catch (t: Throwable) {
             t.printStackTrace()

@@ -36,13 +36,5 @@ class GamepadInputView(context: Context, private val controller: OverlayControll
         return consumed || super.onGenericMotionEvent(event)
     }
 
-    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        if (isGamepadSource(event) && controller.onGamepadKey(keyCode, true, event)) return true
-        return super.onKeyDown(keyCode, event)
-    }
-
-    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
-        if (isGamepadSource(event) && controller.onGamepadKey(keyCode, false, event)) return true
-        return super.onKeyUp(keyCode, event)
-    }
+    // 按键统一由无障碍服务的全局按键通道处理（onKeyEvent），本视图只负责摇杆轴
 }

@@ -55,16 +55,20 @@ class GestureAccessibilityService : AccessibilityService() {
         val src = event.source
         val isGamepad = (src and 1025) == 1025 || (src and 16777232) == 16777232
         if (!isGamepad) return super.onKeyEvent(event)
-        if (c.mouseActive) return super.onKeyEvent(event)
-        // 未激活：响应用户配置的唤出键（L3 等），以及任何映射为"唤出/隐藏光标"的键（如 X）
-        val cfg = ConfigStore.load(this)
         val name = ConfigStore.keyNameOf(event.keyCode) ?: return super.onKeyEvent(event)
-        val isToggle = name == cfg.toggleKey || cfg.gamepadMap[name] == Action.TOGGLE_MOUSE.id
-        if (isToggle && event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
-            c.toggleMouse()
-            return true
+        if (!c.mouseActive) {
+            // 未激活：响应用户配置的唤出键（L3 等），以及任何映射为"唤出/隐藏光标"的键（如 X）
+            val cfg = ConfigStore.load(this)
+            val isToggle = name == cfg.toggleKey || cfg.gamepadMap[name] == Action.TOGGLE_MOUSE.id
+            if (isToggle && event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                c.toggleMouse()
+                return true
+            }
+            return super.onKeyEvent(event)
         }
-        return super.onKeyEvent(event)
+        // 激活：统一由服务处理全部手柄按键（不依赖焦点窗焦点状态），
+        // 映射到的键消费掉（返回 true），未映射的放行给应用
+        return c.onGamepadKey(event.keyCode, event.action != KeyEvent.ACTION_UP, event)
     }
 
     override fun onConfigurationChanged(config: android.content.res.Configuration) {
