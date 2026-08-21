@@ -45,16 +45,4 @@ class GamepadInputView(context: Context, private val controller: OverlayControll
         if (isGamepadSource(event) && controller.onGamepadKey(keyCode, false, event)) return true
         return super.onKeyUp(keyCode, event)
     }
-
-    /**
-     * 触摸到屏幕其他位置（FLAG_WATCH_OUTSIDE_TOUCH）：
-     * 上报给控制器决定是否"休眠"鼠标（与参考应用一致：触摸即让出触摸给应用）。
-     * 注意：本视图不消费任何触摸，应用始终能正常收到触摸。
-     */
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (event.actionMasked == MotionEvent.ACTION_OUTSIDE) {
-            controller.onOutsideTouch(event.rawX, event.rawY)
-        }
-        return false
-    }
 }
