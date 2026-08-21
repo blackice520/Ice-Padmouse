@@ -533,16 +533,18 @@ class OverlayController(private val service: GestureAccessibilityService) {
     fun execute(action: Action) {
         val s = GestureAccessibilityService.instance ?: return
         lastActivity = System.currentTimeMillis()
+        // 光标若停在本应用悬浮窗上，自动挪到最近空白处（避免点击被自己吞掉/触发悬浮键）
+        val (tx, ty) = freeCursorTarget()
         when (action) {
-            Action.CLICK -> { s.tap(cursorX, cursorY); haptic() }
-            Action.DOUBLE_CLICK -> { s.doubleTap(cursorX, cursorY); haptic() }
-            Action.LONG_PRESS -> { s.longPress(cursorX, cursorY); haptic() }
-            Action.SWIPE_UP -> s.swipe(cursorX, cursorY, cursorX, cursorY - dp(180).toFloat(), 300)
-            Action.SWIPE_DOWN -> s.swipe(cursorX, cursorY, cursorX, cursorY + dp(180).toFloat(), 300)
-            Action.SWIPE_LEFT -> s.swipe(cursorX, cursorY, cursorX - dp(180).toFloat(), cursorY, 300)
-            Action.SWIPE_RIGHT -> s.swipe(cursorX, cursorY, cursorX + dp(180).toFloat(), cursorY, 300)
-            Action.SCROLL_UP -> s.scrollAt(cursorX, cursorY, config.scrollStep, up = true)
-            Action.SCROLL_DOWN -> s.scrollAt(cursorX, cursorY, config.scrollStep, up = false)
+            Action.CLICK -> { s.tap(tx, ty); haptic() }
+            Action.DOUBLE_CLICK -> { s.doubleTap(tx, ty); haptic() }
+            Action.LONG_PRESS -> { s.longPress(tx, ty); haptic() }
+            Action.SWIPE_UP -> s.swipe(tx, ty, tx, ty - dp(180).toFloat(), 300)
+            Action.SWIPE_DOWN -> s.swipe(tx, ty, tx, ty + dp(180).toFloat(), 300)
+            Action.SWIPE_LEFT -> s.swipe(tx, ty, tx - dp(180).toFloat(), ty, 300)
+            Action.SWIPE_RIGHT -> s.swipe(tx, ty, tx + dp(180).toFloat(), ty, 300)
+            Action.SCROLL_UP -> s.scrollAt(tx, ty, config.scrollStep, up = true)
+            Action.SCROLL_DOWN -> s.scrollAt(tx, ty, config.scrollStep, up = false)
             Action.MUTE -> {
                 (ctx.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager)
                     ?.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.ADJUST_MUTE, 0)
@@ -626,19 +628,58 @@ class OverlayController(private val service: GestureAccessibilityService) {
     }
 
     /** 触摸点是否落在我们自己的交互窗口上（控制台/编辑栏/选择面板/自定义按键） */
-    fun isTouchOnOurWindows(x: Float, y: Float): Boolean {
-        fun hit(r: android.graphics.Rect?): Boolean =
-            r != null && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom
-        if (hit(panelParams?.let { android.graphics.Rect(it.x, it.y, it.x + it.width, it.y + it.height) })) return true
-        if (hit(editBarParams?.let { android.graphics.Rect(it.x, it.y, it.x + it.width, it.y + it.height) })) return true
-        if (hit(picker.windowRect())) return true
+    fun isTouchOnOurWindows(x: Float, y: Float): Boolean =
+        ourWindowRects().any { x >= it.left && x <= it.right && y >= it.top && y <= it.bottom }
+
+    /** 本应用全部交互窗口的屏幕矩形 */
+    private fun ourWindowRects(): List<android.graphics.Rect> {
+        val rects = mutableListOf<android.graphics.Rect>()
+        panelParams?.let { rects.add(android.graphics.Rect(it.x, it.y, it.x + it.width, it.y + it.height)) }
+        editBarParams?.let { rects.add(android.graphics.Rect(it.x, it.y, it.x + it.width, it.y + it.height)) }
+        picker.windowRect()?.let { rects.add(it) }
         config.buttons.forEach { b ->
             val size = dp(b.sizeDp)
             val l = (b.x * screenW - size / 2f).toInt()
             val t = (b.y * screenH - size / 2f).toInt()
-            if (hit(android.graphics.Rect(l, t, l + size, t + size))) return true
+            rects.add(android.graphics.Rect(l, t, l + size, t + size))
         }
-        return false
+        return rects
+    }
+
+    /**
+     * 若 (x,y) 被本应用窗口覆盖，返回距离最近的未被覆盖点；
+     * 否则原样返回。保证注入的点击/拖拽始终落在应用窗口上，
+     * 避免点击被悬浮窗吞掉（或误触发悬浮键形成注入循环）。
+     */
+    private fun nearestFreePoint(x: Float, y: Float): Pair<Float, Float> {
+        fun free(px: Float, py: Float): Boolean =
+            ourWindowRects().none { px >= it.left && px <= it.right && py >= it.top && py <= it.bottom }
+        if (free(x, y)) return x to y
+        val step = dp(12).toFloat()
+        for (ring in 1..50) {
+            val r = ring * step
+            val candidates = listOf(
+                x to y - r, x to y + r, x - r to y, x + r to y,
+                x - r to y - r, x + r to y - r, x - r to y + r, x + r to y + r
+            )
+            for ((px, py) in candidates) {
+                val cx = px.coerceIn(0f, screenW.toFloat())
+                val cy = py.coerceIn(0f, screenH.toFloat())
+                if (free(cx, cy)) return cx to cy
+            }
+        }
+        return screenW / 2f to screenH / 2f
+    }
+
+    /** 取光标处可注入手势的目标点：若被本应用窗口覆盖则就近挪开并更新光标显示 */
+    private fun freeCursorTarget(): Pair<Float, Float> {
+        val (tx, ty) = nearestFreePoint(cursorX, cursorY)
+        if (tx != cursorX || ty != cursorY) {
+            cursorX = tx
+            cursorY = ty
+            updateCursor()
+        }
+        return tx to ty
     }
 
     /** 手柄摇杆轴事件（来自 GamepadInputView） */
@@ -690,13 +731,14 @@ class OverlayController(private val service: GestureAccessibilityService) {
         return true
     }
 
-    /** 左键按下：不立即派发，等 tick 决定点击/拖拽 */
+    /** 左键按下：不立即派发，等 tick 决定点击/拖拽。按下点取光标处可注入位置 */
     private fun leftButtonDown() {
         if (leftHeld) return
+        val (tx, ty) = freeCursorTarget()
         leftHeld = true
         leftDragging = false
-        pressX = cursorX
-        pressY = cursorY
+        pressX = tx
+        pressY = ty
         pressTime = System.currentTimeMillis()
         lastActivity = pressTime
     }
@@ -711,7 +753,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
             leftDragging = false
         } else {
             val s = GestureAccessibilityService.instance ?: return
-            s.tap(cursorX, cursorY)
+            val (tx, ty) = freeCursorTarget()
+            s.tap(tx, ty)
             haptic()
         }
     }
@@ -734,7 +777,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
     private fun endChainDrag() {
         if (!chainActive) return
         chainActive = false
-        GestureAccessibilityService.instance?.dragEnd(cursorX, cursorY)
+        val (tx, ty) = freeCursorTarget()
+        GestureAccessibilityService.instance?.dragEnd(tx, ty)
     }
 
     /** 60fps 主循环：速度积分、拖拽状态机、右摇杆滚动、空闲超时 */
