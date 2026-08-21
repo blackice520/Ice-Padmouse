@@ -83,6 +83,7 @@ data class AppConfig(
     var cursorAutoHide: Boolean = true,// 光标空闲自动隐藏
     var panelX: Float = -1f,           // 控制台位置（屏幕宽度比例，-1=默认居中偏下）
     var panelY: Float = -1f,           // 控制台位置（屏幕高度比例，-1=默认居中偏下）
+    var panelVisible: Boolean = false, // 控制台是否显示（持久化，默认不自动弹出）
     var mouseSpeed: Int = 50,          // 手柄光标速度 1..100
     var sensitivity: Int = 15,         // 手柄灵敏度 1..100（幂次曲线强度）
     var deadzone: Int = 15,            // 摇杆死区 0..50 (%)
@@ -122,6 +123,7 @@ data class AppConfig(
             .put("cursorAutoHide", cursorAutoHide)
             .put("panelX", panelX.toDouble())
             .put("panelY", panelY.toDouble())
+            .put("panelVisible", panelVisible)
             .put("mouseSpeed", mouseSpeed)
             .put("sensitivity", sensitivity)
             .put("deadzone", deadzone)
@@ -152,6 +154,7 @@ data class AppConfig(
                 cfg.cursorAutoHide = o.optBoolean("cursorAutoHide", true)
                 cfg.panelX = o.optDouble("panelX", -1.0).toFloat()
                 cfg.panelY = o.optDouble("panelY", -1.0).toFloat()
+                cfg.panelVisible = o.optBoolean("panelVisible", false)
                 cfg.mouseSpeed = o.optInt("mouseSpeed", 50).coerceIn(1, 100)
                 cfg.sensitivity = o.optInt("sensitivity", 15).coerceIn(1, 100)
                 cfg.deadzone = o.optInt("deadzone", 15).coerceIn(0, 50)

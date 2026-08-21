@@ -56,6 +56,19 @@ class OverlayController(private val service: GestureAccessibilityService) {
     val screenW: Int get() = service.resources.displayMetrics.widthPixels
     val screenH: Int get() = service.resources.displayMetrics.heightPixels
 
+    /** 真实显示边界（maximumWindowMetrics，API30+；服务早期 displayMetrics 可能异常） */
+    private fun realScreenSize(): Pair<Int, Int> =
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            try {
+                val b = wm.maximumWindowMetrics.bounds
+                b.width() to b.height()
+            } catch (t: Throwable) {
+                screenW to screenH
+            }
+        } else {
+            screenW to screenH
+        }
+
     // ---- 窗口与视图 ----
     private var panel: LinearLayout? = null
     private var panelParams: WindowManager.LayoutParams? = null
@@ -163,10 +176,12 @@ class OverlayController(private val service: GestureAccessibilityService) {
         instance = this
         mode = if (config.dragMode) Mode.DRAG else Mode.MOVE
         try {
-            cursorX = screenW / 2f
-            cursorY = screenH / 2f
+            val (rw, rh) = realScreenSize()
+            cursorX = rw / 2f
+            cursorY = rh / 2f
             showCursor()
-            showPanel()
+            // 控制台按持久化状态恢复（默认不自动弹出）
+            if (config.panelVisible) showPanel()
             rebuildButtons()
             if (editMode) showEditBar()
             if (mouseActive) activateGamepadFocus()
@@ -321,8 +336,9 @@ class OverlayController(private val service: GestureAccessibilityService) {
         val c = cursor ?: return
         val p = cursorParams ?: return
         val size = (22 * density).toInt()
-        cursorX = cursorX.coerceIn(0f, screenW.toFloat())
-        cursorY = cursorY.coerceIn(0f, screenH.toFloat())
+        val (rw, rh) = realScreenSize()
+        cursorX = cursorX.coerceIn(0f, rw.toFloat())
+        cursorY = cursorY.coerceIn(0f, rh.toFloat())
         p.x = (cursorX - size / 2f).toInt()
         p.y = (cursorY - size / 2f).toInt()
         runCatching { wm.updateViewLayout(c, p) }
@@ -331,9 +347,11 @@ class OverlayController(private val service: GestureAccessibilityService) {
     // ================= 控制台面板 =================
 
     private fun showPanel() {
-        if (panel != null) { if (panelVisible) return else addPanelWindow() }
+        // 每次全新重建，避免复用已移除的窗口视图（防止"隐藏后重新显示"崩溃）
         buildPanel()
         addPanelWindow()
+        config.panelVisible = true
+        saveConfig()
     }
 
     private fun addPanelWindow() {
@@ -359,11 +377,23 @@ class OverlayController(private val service: GestureAccessibilityService) {
 
     private fun hidePanel() {
         panel?.let { runCatching { wm.removeView(it) } }
+        // 彻底清理视图引用，下次显示时全新重建
+        panel = null
+        panelParams = null
+        panelGrabState = null
+        joystick = null
+        modeButtons.clear()
+        editKeyView = null
+        buttonsKeyView = null
+        mouseKeyView = null
+        modeLabel = null
         panelVisible = false
+        config.panelVisible = false
+        saveConfig()
     }
 
     fun togglePanel() {
-        if (panelVisible) hidePanel() else addPanelWindow()
+        if (panelVisible) hidePanel() else showPanel()
     }
 
     fun panelVisible(): Boolean = panelVisible
