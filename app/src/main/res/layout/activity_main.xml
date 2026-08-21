@@ -72,53 +72,15 @@
                         android:layout_height="wrap_content"
                         android:text="@string/btn_access" />
                 </LinearLayout>
-            </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-        <!-- 悬浮窗权限 -->
-        <com.google.android.material.card.MaterialCardView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            app:cardBackgroundColor="@color/card_bg"
-            app:cardCornerRadius="14dp">
-
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="14dp">
 
                 <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/card_overlay"
-                    android:textSize="15sp"
-                    android:textStyle="bold"
-                    android:textColor="#333333" />
-
-                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="8dp"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical">
-
-                    <TextView
-                        android:id="@+id/tvOverlayStatus"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="○ 未授权"
-                        android:textSize="14sp"
-                        android:textColor="@color/status_off" />
-
-                    <Button
-                        android:id="@+id/btnOverlay"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/btn_overlay" />
-                </LinearLayout>
+                    android:text="@string/access_note"
+                    android:textSize="12sp"
+                    android:textColor="#777777"
+                    android:lineSpacingExtra="2dp" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
@@ -168,7 +130,7 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- 物理手柄 -->
+        <!-- 物理手柄说明 -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -190,29 +152,6 @@
                     android:textStyle="bold"
                     android:textColor="#333333" />
 
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical">
-
-                    <TextView
-                        android:id="@+id/tvImeStatus"
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="@string/gamepad_status_off"
-                        android:textSize="14sp"
-                        android:textColor="@color/status_off" />
-
-                    <Button
-                        android:id="@+id/btnIme"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="@string/btn_ime" />
-                </LinearLayout>
-
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -224,11 +163,43 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
+        <!-- 光标样式 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="18dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="@string/label_style"
+                android:textSize="14sp"
+                android:textColor="#333333" />
+
+            <TextView
+                android:id="@+id/tvStyleValue"
+                android:layout_width="40dp"
+                android:layout_height="wrap_content"
+                android:text="橙"
+                android:textSize="14sp"
+                android:gravity="end"
+                android:textColor="#333333" />
+
+            <Button
+                android:id="@+id/btnStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/btn_switch_style" />
+        </LinearLayout>
+
         <!-- 光标速度 -->
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="18dp"
+            android:layout_marginTop="14dp"
             android:text="@string/label_speed"
             android:textSize="14sp"
             android:textColor="#333333" />
@@ -250,6 +221,37 @@
                 android:layout_width="48dp"
                 android:layout_height="wrap_content"
                 android:text="×6"
+                android:textSize="14sp"
+                android:gravity="end"
+                android:textColor="#333333" />
+        </LinearLayout>
+
+        <!-- 手柄摇杆死区 -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="@string/label_deadzone"
+            android:textSize="14sp"
+            android:textColor="#333333" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <SeekBar
+                android:id="@+id/sbDeadzone"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1" />
+
+            <TextView
+                android:id="@+id/tvDeadzoneValue"
+                android:layout_width="48dp"
+                android:layout_height="wrap_content"
+                android:text="15%"
                 android:textSize="14sp"
                 android:gravity="end"
                 android:textColor="#333333" />

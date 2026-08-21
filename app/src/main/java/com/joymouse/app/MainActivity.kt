@@ -3,11 +3,9 @@ package com.joymouse.app
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
-import android.view.inputmethod.InputMethodManager
 import android.widget.Button
 import android.widget.SeekBar
 import android.widget.TextView
@@ -21,36 +19,43 @@ import com.joymouse.app.service.GestureAccessibilityService
 class MainActivity : AppCompatActivity() {
 
     private lateinit var tvAccess: TextView
-    private lateinit var tvOverlay: TextView
-    private lateinit var tvIme: TextView
     private lateinit var tvSpeedValue: TextView
     private lateinit var tvOpacityValue: TextView
+    private lateinit var tvDeadzoneValue: TextView
+    private lateinit var tvStyleValue: TextView
+
+    private val cursorStyles = listOf(
+        "orange" to "橙",
+        "white" to "白",
+        "red" to "红",
+        "green" to "绿",
+        "blue" to "蓝",
+        "black" to "黑",
+    )
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
         tvAccess = findViewById(R.id.tvAccessStatus)
-        tvOverlay = findViewById(R.id.tvOverlayStatus)
-        tvIme = findViewById(R.id.tvImeStatus)
         tvSpeedValue = findViewById(R.id.tvSpeedValue)
         tvOpacityValue = findViewById(R.id.tvOpacityValue)
+        tvDeadzoneValue = findViewById(R.id.tvDeadzoneValue)
+        tvStyleValue = findViewById(R.id.tvStyleValue)
 
         findViewById<Button>(R.id.btnAccess).setOnClickListener {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
-        findViewById<Button>(R.id.btnOverlay).setOnClickListener {
-            startActivity(
-                Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:$packageName")
-                )
-            )
-        }
         findViewById<Button>(R.id.btnTogglePanel).setOnClickListener { togglePanel() }
         findViewById<Button>(R.id.btnEditLayout).setOnClickListener { toggleEdit() }
-        findViewById<Button>(R.id.btnIme).setOnClickListener {
-            startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS))
+        findViewById<Button>(R.id.btnStyle).setOnClickListener {
+            val config = ConfigStore.load(this)
+            val idx = cursorStyles.indexOfFirst { it.first == config.cursorStyle }
+            val next = cursorStyles[(idx + 1) % cursorStyles.size]
+            config.cursorStyle = next.first
+            ConfigStore.save(this, config)
+            tvStyleValue.text = next.second
+            OverlayController.instance?.onCursorStyleChanged()
         }
 
         val config = ConfigStore.load(this)
@@ -85,6 +90,22 @@ class MainActivity : AppCompatActivity() {
         })
         tvOpacityValue.text = "${(config.panelOpacity * 100).toInt()}%"
 
+        // 手柄摇杆死区
+        val sbDeadzone = findViewById<SeekBar>(R.id.sbDeadzone)
+        sbDeadzone.max = 50
+        sbDeadzone.progress = config.deadzone.coerceIn(0, 50)
+        sbDeadzone.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
+                config.deadzone = p
+                tvDeadzoneValue.text = "$p%"
+                ConfigStore.save(this@MainActivity, config)
+            }
+            override fun onStartTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) {}
+        })
+        tvDeadzoneValue.text = "${config.deadzone}%"
+        tvStyleValue.text = cursorStyles.firstOrNull { it.first == config.cursorStyle }?.second ?: "橙"
+
         val swAutoHide = findViewById<SwitchCompat>(R.id.swCursorAutoHide)
         swAutoHide.isChecked = config.cursorAutoHide
         swAutoHide.setOnCheckedChangeListener { _, checked ->
@@ -105,40 +126,8 @@ class MainActivity : AppCompatActivity() {
         tvAccess.setTextColor(
             if (accessOn) getColor(R.color.status_on) else getColor(R.color.status_off)
         )
-        val overlayOn = Settings.canDrawOverlays(this)
-        tvOverlay.text = if (overlayOn) "● 已授权" else "○ 未授权"
-        tvOverlay.setTextColor(
-            if (overlayOn) getColor(R.color.status_on) else getColor(R.color.status_off)
-        )
         findViewById<Button>(R.id.btnTogglePanel).text =
             if (OverlayController.instance?.panelVisible() == true) "隐藏悬浮控制台" else "显示悬浮控制台"
-
-        // 手柄输入法状态
-        val imeEnabled = imeEnabled()
-        val imeActive = imeActive()
-        tvIme.text = when {
-            imeActive -> getString(R.string.gamepad_status_active)
-            imeEnabled -> getString(R.string.gamepad_status_on)
-            else -> getString(R.string.gamepad_status_off)
-        }
-        tvIme.setTextColor(
-            when {
-                imeActive -> getColor(R.color.status_on)
-                imeEnabled -> getColor(R.color.accent)
-                else -> getColor(R.color.status_off)
-            }
-        )
-    }
-
-    private fun imeEnabled(): Boolean {
-        val im = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-        return im.enabledInputMethodList.any { it.component?.packageName == packageName }
-    }
-
-    private fun imeActive(): Boolean {
-        val cur = Settings.Secure.getString(contentResolver, Settings.Secure.DEFAULT_INPUT_METHOD)
-            ?: return false
-        return cur.startsWith(packageName)
     }
 
     private fun isAccessibilityEnabled(): Boolean {
@@ -148,14 +137,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun togglePanel() {
-        if (!isAccessibilityEnabled() || !Settings.canDrawOverlays(this)) {
-            Toast.makeText(this, "请先开启无障碍服务与悬浮窗权限", Toast.LENGTH_SHORT).show()
+        if (!isAccessibilityEnabled()) {
+            Toast.makeText(this, "请先开启无障碍服务", Toast.LENGTH_SHORT).show()
             return
         }
         var c = OverlayController.instance
         val svc = GestureAccessibilityService.instance
         if (c == null && svc != null) {
-            // 服务已运行但控制台尚未拉起（例如授权晚于服务开启）
             c = OverlayController(svc).also { it.show() }
         }
         if (c == null) {

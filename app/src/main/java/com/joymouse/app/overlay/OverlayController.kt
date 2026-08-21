@@ -2,13 +2,16 @@ package com.joymouse.app.overlay
 
 import android.content.Context
 import android.graphics.Color
+import android.graphics.PorterDuff
 import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
-import android.provider.Settings
 import android.view.Gravity
+import android.view.InputDevice
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
@@ -22,10 +25,18 @@ import com.joymouse.app.config.AppConfig
 import com.joymouse.app.config.ConfigStore
 import com.joymouse.app.config.MappedButton
 import com.joymouse.app.service.GestureAccessibilityService
+import kotlin.math.hypot
+import kotlin.math.pow
 
 /**
  * 悬浮窗控制器：负责控制台（摇杆+面板键）、鼠标光标、自定义按键、编辑模式、
- * 动作执行（点击/拖拽/滑动/滚动/系统动作）。
+ * 动作执行（点击/拖拽/滑动/滚动/系统动作）与物理手柄输入（摇杆/按键）。
+ *
+ * 光标与手柄捕获窗口均使用 TYPE_ACCESSIBILITY_OVERLAY（无障碍专用窗口类型），
+ * 不需要 SYSTEM_ALERT_WINDOW 悬浮窗权限。
+ *
+ * 与参考应用（gamepad mouse）不同：唤出/移动光标绝不派发任何额外手势，
+ * 不存在"唤出鼠标自动点击左上角"的问题。
  */
 class OverlayController(private val service: GestureAccessibilityService) {
 
@@ -58,6 +69,10 @@ class OverlayController(private val service: GestureAccessibilityService) {
     private val modeButtons = mutableMapOf<Mode, TextView>()
     internal val picker = ActionPicker(this)
 
+    /** 手柄输入焦点捕获窗（1×1 可聚焦无障碍窗口，位于 (0,0)） */
+    private var gamepadView: GamepadInputView? = null
+    private var gamepadParams: WindowManager.LayoutParams? = null
+
     private class GrabState(var startWx: Int, var startWy: Int, var downRawX: Float, var downRawY: Float)
 
     // ---- 状态 ----
@@ -71,6 +86,36 @@ class OverlayController(private val service: GestureAccessibilityService) {
     private var dragging = false
     private var lastConfigSave = 0L
 
+    // ---- 鼠标（手柄）状态 ----
+    /** 鼠标是否激活：激活时显示光标并捕获手柄输入 */
+    var mouseActive = true
+        private set
+
+    /** 左摇杆速度向量（归一化，未经过死区处理，由 tick 处理） */
+    private var stickX = 0f
+    private var stickY = 0f
+    /** 右摇杆滚动方向向量 */
+    private var scrollX = 0f
+    private var scrollY = 0f
+    /** 左键按下状态机：held=按下，dragging=已转拖拽 */
+    private var leftHeld = false
+    private var leftDragging = false
+    private var pressX = 0f
+    private var pressY = 0f
+    private var pressTime = 0L
+    private var lastScrollTime = 0L
+    private var lastActivity = 0L
+    /** 连续拖拽链（复用服务的链式拖拽） */
+    private var chainActive = false
+
+    private val tickHandler = Handler(Looper.getMainLooper())
+    private val tickRunnable = object : Runnable {
+        override fun run() {
+            tick()
+            tickHandler.postDelayed(this, 16)
+        }
+    }
+
     // 光标空闲自动隐藏
     private val idleHandler = Handler(Looper.getMainLooper())
     private val idleRunnable = Runnable {
@@ -81,7 +126,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
 
     // ================= 显示 / 隐藏 =================
 
-    fun canOverlay(): Boolean = Settings.canDrawOverlays(ctx)
+    /** 无障碍窗口类型：无需悬浮窗权限 */
+    fun canOverlay(): Boolean = true
 
     fun show() {
         if (!canOverlay()) return
@@ -94,6 +140,9 @@ class OverlayController(private val service: GestureAccessibilityService) {
             showPanel()
             rebuildButtons()
             if (editMode) showEditBar()
+            if (mouseActive) activateGamepadFocus()
+            tickHandler.removeCallbacks(tickRunnable)
+            tickHandler.post(tickRunnable)
         } catch (t: Throwable) {
             t.printStackTrace()
         }
@@ -102,11 +151,13 @@ class OverlayController(private val service: GestureAccessibilityService) {
     fun hide() {
         instance = null
         idleHandler.removeCallbacks(idleRunnable)
+        tickHandler.removeCallbacks(tickRunnable)
         try {
             hideCursor()
             hidePanel()
             hideEditBar()
             picker.hide()
+            deactivateGamepadFocus()
             buttonViews.keys.toList().forEach { removeButtonWindow(it) }
             buttonViews.clear()
         } catch (t: Throwable) {
@@ -134,6 +185,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
         val size = (22 * density).toInt()
         val iv = ImageView(ctx)
         iv.setImageResource(R.drawable.ic_cursor_dot)
+        applyCursorStyle(iv)
         cursorParams = baseParams(size, size).apply {
             x = (cursorX - size / 2f).toInt()
             y = (cursorY - size / 2f).toInt()
@@ -142,6 +194,24 @@ class OverlayController(private val service: GestureAccessibilityService) {
         cursor = iv
         cursorVisible = true
         scheduleCursorHide()
+    }
+
+    /** 光标样式着色（orange/white/red/green/blue/black） */
+    private fun applyCursorStyle(iv: ImageView) {
+        val tint = when (config.cursorStyle) {
+            "white" -> Color.WHITE
+            "red" -> Color.rgb(244, 67, 54)
+            "green" -> Color.rgb(76, 175, 80)
+            "blue" -> Color.rgb(33, 150, 243)
+            "black" -> Color.BLACK
+            else -> Color.rgb(255, 152, 0) // orange
+        }
+        iv.setColorFilter(tint, PorterDuff.Mode.SRC_IN)
+    }
+
+    /** 主界面切换光标样式后调用 */
+    fun onCursorStyleChanged() {
+        cursor?.let { applyCursorStyle(it) }
     }
 
     private fun hideCursor() {
@@ -201,7 +271,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
         val p = panel ?: return
         val w = (110 * density).toInt()
         val defaultX = dp(10)
-        val defaultY = (screenH / 2 - 120 * density).toInt().coerceAtLeast(dp(10))
+        val defaultY = (screenH / 2 - 150 * density).toInt().coerceAtLeast(dp(10))
         val useX = if (config.panelX >= 0f) (config.panelX * screenW).toInt() else defaultX
         val useY = if (config.panelY >= 0f) (config.panelY * screenH).toInt() else defaultY
         if (config.panelX < 0f || config.panelY < 0f) {
@@ -283,6 +353,12 @@ class OverlayController(private val service: GestureAccessibilityService) {
             dragKey,
             scrollKey,
             panelKey("编辑") { setEditing(!editMode) },
+        ))
+        // 第三行：手柄开关 / 光标开关 / 隐藏控制台
+        p.addView(rowOf(
+            panelKey("手柄") { toggleMouse() },
+            panelKey("光标") { toggleCursor() },
+            panelKey("隐藏") { hidePanel() },
         ))
 
         panel = p
@@ -420,6 +496,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
 
     fun execute(action: Action) {
         val s = GestureAccessibilityService.instance ?: return
+        lastActivity = System.currentTimeMillis()
         when (action) {
             Action.CLICK -> { s.tap(cursorX, cursorY); haptic() }
             Action.DOUBLE_CLICK -> { s.doubleTap(cursorX, cursorY); haptic() }
@@ -430,8 +507,214 @@ class OverlayController(private val service: GestureAccessibilityService) {
             Action.SWIPE_RIGHT -> s.swipe(cursorX, cursorY, cursorX + dp(180).toFloat(), cursorY, 300)
             Action.SCROLL_UP -> s.scrollAt(cursorX, cursorY, config.scrollStep, up = true)
             Action.SCROLL_DOWN -> s.scrollAt(cursorX, cursorY, config.scrollStep, up = false)
+            Action.MUTE -> {
+                (ctx.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager)
+                    ?.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.ADJUST_MUTE, 0)
+            }
+            // 快进/快退：双击屏幕右侧 80% / 左侧 20% 宽度处（参考应用行为，适配视频类 App 点按区）
+            Action.MEDIA_FORWARD -> s.doubleTap(screenW * 0.8f, cursorY)
+            Action.MEDIA_REWIND -> s.doubleTap(screenW * 0.2f, cursorY)
+            Action.TOGGLE_MOUSE -> toggleMouse()
             Action.TOGGLE_PANEL -> togglePanel()
             else -> s.performGlobal(action)
+        }
+    }
+
+    // ================= 物理手柄（焦点捕获） =================
+
+    /** 激活手柄焦点：添加 1×1 可聚焦窗口，捕获手柄按键与摇杆轴 */
+    private fun activateGamepadFocus() {
+        if (gamepadView != null) return
+        try {
+            val v = GamepadInputView(ctx, this)
+            gamepadParams = baseParams(1, 1).apply {
+                flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
+                x = 0
+                y = 0
+            }
+            wm.addView(v, gamepadParams)
+            gamepadView = v
+            v.requestFocus()
+        } catch (t: Throwable) {
+            t.printStackTrace()
+            gamepadView = null
+        }
+    }
+
+    /** 关闭手柄焦点 */
+    private fun deactivateGamepadFocus() {
+        gamepadView?.let { runCatching { wm.removeView(it) } }
+        gamepadView = null
+        gamepadParams = null
+    }
+
+    /** 唤出/关闭鼠标（L3 或面板按钮触发）。唤出过程绝不派发任何手势。 */
+    fun toggleMouse() {
+        mouseActive = !mouseActive
+        if (mouseActive) {
+            activateGamepadFocus()
+            showCursor()
+        } else {
+            deactivateGamepadFocus()
+            hideCursor()
+            releaseLeftButton()
+            stickX = 0f
+            stickY = 0f
+            scrollX = 0f
+            scrollY = 0f
+        }
+        haptic()
+    }
+
+    /** 手柄摇杆轴事件（来自 GamepadInputView） */
+    fun onGamepadMotion(event: MotionEvent): Boolean {
+        if (!mouseActive) return false
+        val src = event.source
+        val isGamepad = (src and InputDevice.SOURCE_GAMEPAD) != 0 || (src and InputDevice.SOURCE_JOYSTICK) != 0
+        if (!isGamepad || event.actionMasked != MotionEvent.ACTION_MOVE) return false
+        // 左摇杆：AXIS_X / AXIS_Y
+        stickX = event.getAxisValue(MotionEvent.AXIS_X)
+        stickY = event.getAxisValue(MotionEvent.AXIS_Y)
+        // 右摇杆：RX/RY（部分手柄用 Z/RZ）
+        var rx = event.getAxisValue(MotionEvent.AXIS_RX)
+        var ry = event.getAxisValue(MotionEvent.AXIS_RY)
+        val rz = event.getAxisValue(MotionEvent.AXIS_Z)
+        val rw = event.getAxisValue(MotionEvent.AXIS_RZ)
+        if (kotlin.math.abs(rx) <= kotlin.math.abs(rw)) rx = rw
+        if (kotlin.math.abs(ry) <= kotlin.math.abs(rz)) ry = rz
+        scrollX = rx
+        scrollY = ry
+        lastActivity = System.currentTimeMillis()
+        return true
+    }
+
+    /** 手柄按键事件（来自 GamepadInputView 或服务 onKeyEvent） */
+    fun onGamepadKey(keyCode: Int, down: Boolean, event: KeyEvent?): Boolean {
+        if (!mouseActive) return false
+        val name = ConfigStore.keyNameOf(keyCode) ?: return false
+        // 唤出键：切换鼠标开关（仅在按下瞬间）
+        if (name == config.toggleKey) {
+            if (down && (event == null || event.repeatCount == 0)) toggleMouse()
+            return true
+        }
+        // 左键（单击/拖拽）状态机：A 键（或交换后 B 键）
+        val clickKey = if (config.swapAB) "b" else "a"
+        if (name == clickKey) {
+            if (down && (event == null || event.repeatCount == 0)) leftButtonDown()
+            if (!down) leftButtonUp()
+            return true
+        }
+        val actionId = config.gamepadMap[name] ?: return false
+        val action = Action.fromId(actionId)
+        if (down && (event == null || event.repeatCount == 0)) {
+            if (action == Action.NOOP) return true
+            if (action == Action.TOGGLE_MOUSE) toggleMouse()
+            else execute(action)
+        }
+        return true
+    }
+
+    /** 左键按下：不立即派发，等 tick 决定点击/拖拽 */
+    private fun leftButtonDown() {
+        if (leftHeld) return
+        leftHeld = true
+        leftDragging = false
+        pressX = cursorX
+        pressY = cursorY
+        pressTime = System.currentTimeMillis()
+        lastActivity = pressTime
+    }
+
+    /** 左键抬起：未拖拽则单击 */
+    private fun leftButtonUp() {
+        if (!leftHeld) return
+        leftHeld = false
+        lastActivity = System.currentTimeMillis()
+        if (leftDragging) {
+            endChainDrag()
+            leftDragging = false
+        } else {
+            val s = GestureAccessibilityService.instance ?: return
+            s.tap(cursorX, cursorY)
+            haptic()
+        }
+    }
+
+    private fun releaseLeftButton() {
+        if (leftHeld) {
+            leftHeld = false
+            if (leftDragging) endChainDrag()
+            leftDragging = false
+        }
+    }
+
+    private fun startChainDrag() {
+        val s = GestureAccessibilityService.instance ?: return
+        s.dragStart(pressX, pressY)
+        chainActive = true
+        haptic()
+    }
+
+    private fun endChainDrag() {
+        if (!chainActive) return
+        chainActive = false
+        GestureAccessibilityService.instance?.dragEnd(cursorX, cursorY)
+    }
+
+    /** 60fps 主循环：速度积分、拖拽状态机、右摇杆滚动、空闲超时 */
+    private fun tick() {
+        if (!mouseActive) return
+        val cfg = config
+        val s = GestureAccessibilityService.instance ?: return
+
+        // 1) 左摇杆 → 光标速度（死区 + 幂次曲线）
+        val dead = cfg.deadzone / 100f
+        val len = hypot(stickX, stickY)
+        if (len > dead) {
+            val norm = ((len - dead) / (1f - dead)).coerceIn(0f, 1f)
+            val curve = ((cfg.sensitivity - 1) / 2f)
+            val v = (norm.toDouble().pow(2.5).toFloat() * curve * 0.9f) + ((1f - curve * 0.9f) * norm)
+            val speedPx = (cfg.mouseSpeed / 100f) * 2.4f * density * 16f // 每 tick 位移
+            val dx = (stickX / len) * v * speedPx
+            val dy = (stickY / len) * v * speedPx
+            moveCursorBy(dx, dy)
+            lastActivity = System.currentTimeMillis()
+        }
+
+        // 2) 左键状态机：移动超阈值或静止超 500ms 转拖拽
+        if (leftHeld && !leftDragging) {
+            val moved = hypot(cursorX - pressX, cursorY - pressY) > 6f * density
+            val heldLong = System.currentTimeMillis() - pressTime > 500
+            if (moved || heldLong) {
+                leftDragging = true
+                startChainDrag()
+            }
+        }
+        if (leftDragging) {
+            val g = GestureAccessibilityService.instance
+            if (g != null) {
+                g.dragMove(cursorX, cursorY)
+            }
+        }
+
+        // 3) 右摇杆 → 滚动（每 200ms 一次）
+        val scrollLen = hypot(scrollX, scrollY)
+        if (scrollLen > dead && !leftHeld) {
+            val now = System.currentTimeMillis()
+            if (now - lastScrollTime > 200) {
+                lastScrollTime = now
+                val step = (cfg.scrollStep * cfg.scrollSpeed / 100f).toInt().coerceAtLeast(80)
+                s.scrollAt(cursorX, cursorY, step, up = scrollY < 0)
+                lastActivity = now
+            }
+        }
+
+        // 4) 空闲超时自动关闭鼠标
+        if (cfg.mouseTimeout > 0 && System.currentTimeMillis() - lastActivity > cfg.mouseTimeout * 1000L) {
+            toggleMouse()
         }
     }
 
@@ -571,8 +854,14 @@ class OverlayController(private val service: GestureAccessibilityService) {
     }
 
     private fun haptic() {
+        if (!config.hapticEnabled) return
         val v = ctx.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator ?: return
-        v.vibrate(VibrationEffect.createOneShot(14, VibrationEffect.DEFAULT_AMPLITUDE))
+        v.vibrate(
+            VibrationEffect.createOneShot(
+                14,
+                (config.vibrationIntensity * VibrationEffect.DEFAULT_AMPLITUDE / 255).coerceAtLeast(1)
+            )
+        )
     }
 
     fun roundedDrawable(color: Int, radiusDp: Float): GradientDrawable =
@@ -587,7 +876,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
     private fun baseParams(w: Int, h: Int): WindowManager.LayoutParams =
         WindowManager.LayoutParams(
             w, h,
-            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            // 无障碍专用窗口类型：由无障碍服务创建，无需 SYSTEM_ALERT_WINDOW 权限
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,

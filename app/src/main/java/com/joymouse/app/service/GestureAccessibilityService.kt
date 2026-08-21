@@ -10,8 +10,10 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
+import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import com.joymouse.app.config.Action
+import com.joymouse.app.config.ConfigStore
 import com.joymouse.app.overlay.OverlayController
 
 /**
@@ -42,6 +44,29 @@ class GestureAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) { /* 不需要读取窗口内容 */ }
 
     override fun onInterrupt() { /* 忽略 */ }
+
+    /**
+     * 全局按键（canRequestFilterKeyEvents）：
+     * - 鼠标未激活时：仅响应唤出键（默认 L3），其余放行给应用
+     * - 鼠标激活时：按键已由焦点捕获视图接收，这里不再重复处理
+     */
+    override fun onKeyEvent(event: KeyEvent): Boolean {
+        val c = OverlayController.instance
+        if (c == null) return super.onKeyEvent(event)
+        val src = event.source
+        val isGamepad = (src and 1025) == 1025 || (src and 16777232) == 16777232
+        if (!isGamepad) return super.onKeyEvent(event)
+        if (c.mouseActive) return super.onKeyEvent(event)
+        // 未激活：仅响应用户配置的唤出键（按下瞬间）
+        val name = ConfigStore.keyNameOf(event.keyCode) ?: return super.onKeyEvent(event)
+        if (name == ConfigStore.load(this).toggleKey &&
+            event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0
+        ) {
+            c.toggleMouse()
+            return true
+        }
+        return super.onKeyEvent(event)
+    }
 
     override fun onConfigurationChanged(config: android.content.res.Configuration) {
         super.onConfigurationChanged(config)

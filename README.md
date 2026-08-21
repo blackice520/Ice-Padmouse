@@ -1,38 +1,35 @@
 # JoyMouse 手柄鼠标映射（Android）
 
 在手机上模拟电脑鼠标操作的免 root 手柄/按键映射应用。
+功能与架构参考 [Gamepad Mouse](docs/reference-analysis.md)（已逆向分析其 APK，独立实现）。
 
 ## 功能
 
+- **物理手柄**（蓝牙/USB，免 root）：可聚焦无障碍窗口捕获手柄按键**和模拟摇杆**
+  - 左摇杆 = 移动光标（死区 + 幂次曲线 + 灵敏度），右摇杆 = 滚动页面
+  - A=单击，B=长按(右键)，X=双击，Y=滚轮上，L1=静音，R2=截屏，
+    十字键=音量/媒体，Select=主页，Start=最近任务
+  - **L3（左摇杆按下）= 唤出/关闭鼠标**；唤出过程绝不产生任何自动点击
 - **虚拟摇杆控制台**（悬浮窗，可拖动位置、调节透明度）
   - 移动模式：摇杆移动光标，轻点摇杆 = 左键单击
   - 拖拽模式：按住摇杆 = 按住左键并拖动（进度条、窗口、游戏内拖拽）
   - 滚轮模式：上下推摇杆 = 滚轮滚动页面
-- **物理手柄映射**（蓝牙/USB，免 root）：注册为"无界面输入法"捕获手柄按键
-  - 在系统输入法设置中启用并切换到「JoyMouse 手柄输入法」即可
-  - 默认映射：A=单击，B=长按(右键)，X=双击，Y=滚轮上，L1=滚轮下，R1=音量+，
-    L2/R2=左右滑动，方向键=移动光标，SELECT=主页，START=最近任务，LOGO=显示/隐藏控制台
-  - 限制：摇杆轴事件不进入输入法通道（同 Panda Gamepad Pro 方案），摇杆请用悬浮控制台
-- **鼠标光标**：屏幕中心圆点光标，空闲 6 秒自动隐藏（可关），摇杆一动即出现
+- **鼠标光标**：6 种颜色可选，空闲自动隐藏（可关），摇杆一动即出现
 - **自定义悬浮按键**（最多 12 个，任意位置/大小）
   - 鼠标动作：单击 / 双击 / 长按 / 上滑 / 下滑 / 左滑 / 右滑 / 滚轮上 / 滚轮下
-  - 系统动作：主页 / 返回 / 最近任务 / 截屏 / 通知栏 / 快捷设置 / 音量±
-  - 显示/隐藏控制台、无动作
+  - 系统动作：主页 / 返回 / 最近任务 / 截屏 / 通知栏 / 快捷设置 / 音量± / 静音 / 快进快退
 - **编辑模式**：拖动按键改位置、点击选动作、调整大小、删除、一键添加
 - 长按任意自定义按键可直接进入编辑
-- 控制台位置记忆（拖动后自动保存，旋转屏幕/重启后恢复）
-- 配置本地持久化（SharedPreferences + JSON）
-- JVM 单元测试：`gradle testDebugUnitTest`（配置序列化往返、非法值钳制、动作 ID 回退等 6 例）
+- 控制台位置记忆、配置本地持久化（SharedPreferences + JSON）
+- JVM 单元测试 8 例：`gradle testDebugUnitTest`
 
-## 权限（仅三项，均需在设置中手动开启）
+## 权限（仅一项必需，设置中手动开启）
 
 | 权限 | 用途 |
 |------|------|
-| 无障碍服务（手势模拟） | 通过 `AccessibilityService.dispatchGesture` 注入点击/拖拽/滑动手势（免 root 唯一途径） |
-| 悬浮窗 | 显示控制台、鼠标光标、自定义按键（`TYPE_APPLICATION_OVERLAY`） |
-| 输入法（可选，仅物理手柄需要） | 「JoyMouse 手柄输入法」捕获蓝牙/USB 手柄按键并映射为鼠标动作 |
+| 无障碍服务（手势模拟） | `dispatchGesture` 注入点击/拖拽/滑动手势；光标与手柄捕获使用无障碍专用窗口 `TYPE_ACCESSIBILITY_OVERLAY`（**不需要**"显示在其他应用上层"权限）；`filterKeyEvents` 全局响应唤出键（L3） |
 
-> 无障碍服务不读取屏幕内容（`canRetrieveWindowContent="false"`），仅在操作控制台时注入手势。
+> 无障碍服务不读取屏幕内容（`canRetrieveWindowContent="false"`），仅在操作时注入手势。
 
 ## 技术要点
 
@@ -91,11 +88,11 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 app/src/main/java/com/joymouse/app/
 ├── MainActivity.kt                  # 权限引导 + 设置
-├── config/AppConfig.kt              # 动作枚举/按键模型/配置持久化
-├── service/GestureAccessibilityService.kt  # 手势注入（点击/拖拽/滑动/全局动作）
-├── service/GamepadImeService.kt     # 物理手柄输入法（按键捕获与映射）
+├── config/AppConfig.kt              # 动作枚举/按键模型/手柄映射/配置持久化
+├── service/GestureAccessibilityService.kt  # 手势注入（点击/拖拽/滑动/全局动作）+ 全局唤出键
 └── overlay/
-    ├── OverlayController.kt         # 悬浮窗总控（控制台/光标/编辑模式）
+    ├── OverlayController.kt         # 悬浮窗总控 + 60fps 手柄主循环（速度/拖拽/滚动）
+    ├── GamepadInputView.kt          # 手柄焦点捕获视图（按键 + 摇杆轴）
     ├── JoystickView.kt              # 虚拟摇杆
     ├── MappedButtonView.kt          # 自定义按键
     └── ActionPicker.kt              # 动作选择面板
