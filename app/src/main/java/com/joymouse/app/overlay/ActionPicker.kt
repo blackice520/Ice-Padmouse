@@ -92,6 +92,12 @@ class ActionPicker(private val controller: OverlayController) {
 
     fun isVisible(): Boolean = window != null
 
+    /** 面板所在屏幕矩形（供"触摸是否落在我们窗口上"判断） */
+    fun windowRect(): android.graphics.Rect? {
+        val p = params ?: return null
+        return android.graphics.Rect(p.x, p.y, p.x + p.width, p.y + p.height)
+    }
+
     private fun header(text: String): TextView =
         TextView(ctx).apply {
             this.text = text

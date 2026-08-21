@@ -356,9 +356,9 @@ class OverlayController(private val service: GestureAccessibilityService) {
             scrollKey,
             panelKey("编辑") { setEditing(!editMode) },
         ))
-        // 第三行：手柄开关 / 光标开关 / 隐藏控制台
+        // 第三行：鼠标开关 / 光标开关 / 隐藏控制台
         p.addView(rowOf(
-            panelKey("手柄") { toggleMouse() },
+            panelKey("鼠标") { toggleMouse() },
             panelKey("光标") { toggleCursor() },
             panelKey("隐藏") { hidePanel() },
         ))
@@ -532,7 +532,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
             gamepadParams = baseParams(1, 1).apply {
                 flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
+                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
                 x = 0
                 y = 0
             }
@@ -568,6 +569,41 @@ class OverlayController(private val service: GestureAccessibilityService) {
             scrollY = 0f
         }
         haptic()
+    }
+
+    /** 触摸休眠冷却：鼠标刚关闭 1.5 秒内忽略触摸，避免反复开关 */
+    private var lastOutsideDismiss = 0L
+
+    /**
+     * 屏幕其他位置被触摸（焦点窗 ACTION_OUTSIDE）。
+     * 与参考应用一致：触摸屏幕任意非本应用区域 → 鼠标自动休眠（让出触摸给应用），
+     * 再次按 L3 唤出。触摸本应用窗口（控制台/按键/编辑面板）不会触发休眠。
+     */
+    fun onOutsideTouch(x: Float, y: Float) {
+        if (!mouseActive || editMode) return
+        if (leftHeld || dragging) return
+        val now = System.currentTimeMillis()
+        if (now - lastOutsideDismiss < 1500) return
+        if (now - lastActivity < 300) return
+        if (isTouchOnOurWindows(x, y)) return
+        lastOutsideDismiss = now
+        toggleMouse()
+    }
+
+    /** 触摸点是否落在我们自己的交互窗口上（控制台/编辑栏/选择面板/自定义按键） */
+    fun isTouchOnOurWindows(x: Float, y: Float): Boolean {
+        fun hit(r: android.graphics.Rect?): Boolean =
+            r != null && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom
+        if (hit(panelParams?.let { android.graphics.Rect(it.x, it.y, it.x + it.width, it.y + it.height) })) return true
+        if (hit(editBarParams?.let { android.graphics.Rect(it.x, it.y, it.x + it.width, it.y + it.height) })) return true
+        if (hit(picker.windowRect())) return true
+        config.buttons.forEach { b ->
+            val size = dp(b.sizeDp)
+            val l = (b.x * screenW - size / 2f).toInt()
+            val t = (b.y * screenH - size / 2f).toInt()
+            if (hit(android.graphics.Rect(l, t, l + size, t + size))) return true
+        }
+        return false
     }
 
     /** 手柄摇杆轴事件（来自 GamepadInputView） */

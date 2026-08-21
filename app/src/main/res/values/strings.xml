@@ -12,12 +12,12 @@
     <string name="btn_access">去开启</string>
     <string name="btn_edit_layout">编辑按键布局</string>
     <string name="card_gamepad">物理手柄（蓝牙 / OTG，免 root）</string>
-    <string name="gamepad_help">连上手柄后，按 L3（左摇杆按下）唤出/关闭鼠标。左摇杆=移动光标，右摇杆=滚动，A=单击，B=长按（右键），X=双击，Y=滚轮上，L1=静音，L2/R2=滑动/截屏，十字键=音量/媒体，Select=主页，Start=最近任务。唤出鼠标不会产生任何自动点击。</string>
+    <string name="gamepad_help">连上手柄后，按 L3（左摇杆按下）唤出/关闭鼠标。默认按键映射（与 Gamepad Mouse 一致）：左摇杆=移动光标，右摇杆=滚动，A=单击，B=长按（右键），X=双击，Y=滚轮上，L1=静音，R2=截屏，L2=左滑，R1=音量加，十字键=音量/快进快退，Select=主页，Start=最近任务。唤出鼠标不会产生任何自动点击；手指触摸屏幕会收起鼠标、触摸正常生效（按 L3 再次唤出）。</string>
     <string name="label_style">光标颜色</string>
     <string name="btn_switch_style">切换</string>
     <string name="label_speed">虚拟摇杆光标速度</string>
     <string name="label_deadzone">手柄摇杆死区</string>
     <string name="label_opacity">控制台透明度</string>
     <string name="guide_title">使用说明</string>
-    <string name="guide_text">1. 开启上方无障碍服务；\n2. 点击「显示悬浮控制台」；\n3. 摇杆移动光标：默认模式轻点摇杆=左键；点「拖拽」后按住摇杆即可拖动；点「滚轮」后上下推摇杆滚动页面；\n4. 点「编辑」进入布局编辑：拖动自定义按键调位置，点按键选动作，可添加/删除/调大小；长按任意按键也可快速编辑；\n5. 物理手柄：连上后按 L3 唤出鼠标，左摇杆移动、右摇杆滚动、A/B/X/Y 单击/长按/双击/滚轮（映射可在代码配置中调整）。</string>
+    <string name="guide_text">1. 开启上方无障碍服务；\n2. 点击「显示悬浮控制台」；\n3. 摇杆移动光标：默认模式轻点摇杆=左键；点「拖拽」后按住摇杆即可拖动；点「滚轮」后上下推摇杆滚动页面；\n4. 点「编辑」进入布局编辑：拖动自定义按键调位置，点按键选动作，可添加/删除/调大小；长按任意按键也可快速编辑；\n5. 物理手柄：连上后按 L3 唤出鼠标，左摇杆移动、右摇杆滚动、A/B/X/Y 单击/长按/双击/滚轮；\n6. 鼠标激活时手指触摸屏幕会自动收起鼠标，触摸正常生效，按 L3 再次唤出。</string>
 </resources>

@@ -26,6 +26,9 @@ class MappedButtonView(context: Context, val btn: MappedButton, private val cont
     private var moved = false
     private var pointerId = -1
     private var downTime = 0L
+    /** 按下瞬间的按键位置（百分比坐标），拖动时按"起点+位移"绝对定位，避免累加漂移 */
+    private var downBtnX = 0f
+    private var downBtnY = 0f
 
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -67,6 +70,8 @@ class MappedButtonView(context: Context, val btn: MappedButton, private val cont
                 pointerId = e.getPointerId(0)
                 downX = e.x
                 downY = e.y
+                downBtnX = btn.x
+                downBtnY = btn.y
                 moved = false
                 downTime = SystemClock.uptimeMillis()
                 parent?.requestDisallowInterceptTouchEvent(true)
@@ -99,10 +104,12 @@ class MappedButtonView(context: Context, val btn: MappedButton, private val cont
         return true
     }
 
-    /** 拖动中的即时位置回写（编辑模式） */
+    /** 拖动中的即时位置回写（编辑模式）：起点 + 手指位移，绝对定位 */
     fun moveBy(dx: Float, dy: Float) {
-        btn.x = ((btn.x * controller.screenW + dx) / controller.screenW).coerceIn(0f, 1f)
-        btn.y = ((btn.y * controller.screenH + dy) / controller.screenH).coerceIn(0f, 1f)
+        val px = (downBtnX * controller.screenW + dx).coerceIn(0f, controller.screenW.toFloat())
+        val py = (downBtnY * controller.screenH + dy).coerceIn(0f, controller.screenH.toFloat())
+        btn.x = px / controller.screenW
+        btn.y = py / controller.screenH
         controller.refreshButton(this)
     }
 }
