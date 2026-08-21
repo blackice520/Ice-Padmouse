@@ -67,8 +67,10 @@ class OverlayController(private val service: GestureAccessibilityService) {
     private var editBarParams: WindowManager.LayoutParams? = null
     internal val buttonViews = LinkedHashMap<Long, MappedButtonView>()
     private val modeButtons = mutableMapOf<Mode, TextView>()
+    private var modeLabel: TextView? = null
     private var editKeyView: TextView? = null
     private var buttonsKeyView: TextView? = null
+    private var mouseKeyView: TextView? = null
     internal val picker = ActionPicker(this)
 
     /** 手柄输入焦点捕获窗（1×1 可聚焦无障碍窗口，位于 (0,0)） */
@@ -333,6 +335,16 @@ class OverlayController(private val service: GestureAccessibilityService) {
         }
         p.addView(handle)
 
+        // 模式状态文字
+        val label = TextView(ctx).apply {
+            textSize = 10f
+            gravity = Gravity.CENTER
+            setTextColor(Color.argb(230, 255, 255, 255))
+            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(16))
+        }
+        modeLabel = label
+        p.addView(label)
+
         // 摇杆
         val stick = JoystickView(ctx)
         stick.layoutParams = LinearLayout.LayoutParams(dp(92), dp(92))
@@ -362,6 +374,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
         ))
         // 第三行：鼠标开关 / 自定义按键显隐 / 光标开关 / 隐藏控制台
         val mouseKey = panelKey("鼠标") { toggleMouse() }
+        mouseKeyView = mouseKey
         val buttonsKey = panelKey("按键") { setButtonsVisible(!config.buttonsVisible) }.apply { textSize = 9.5f }
         buttonsKeyView = buttonsKey
         val cursorKey = panelKey("光标") { toggleCursor() }.apply { textSize = 9.5f }
@@ -421,8 +434,16 @@ class OverlayController(private val service: GestureAccessibilityService) {
                 if (mode == m) Color.argb(255, 0, 180, 110) else Color.argb(80, 255, 255, 255), 10f
             )
         }
+        // 模式状态文字：一眼看清当前模式与取消方式
+        modeLabel?.text = when {
+            editMode -> "编辑中·点[完成]退出"
+            mode == Mode.DRAG -> "拖拽中·再点[拖拽]取消"
+            mode == Mode.SCROLL -> "滚轮中·再点[滚轮]取消"
+            else -> "移动·轻点摇杆=左键"
+        }
         setKeyState(editKeyView, editMode)
         setKeyState(buttonsKeyView, config.buttonsVisible)
+        setKeyState(mouseKeyView, mouseActive)
     }
 
     private fun setKeyState(v: TextView?, on: Boolean) {
@@ -581,6 +602,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
             scrollX = 0f
             scrollY = 0f
         }
+        refreshModeButtons()
         haptic()
     }
 
