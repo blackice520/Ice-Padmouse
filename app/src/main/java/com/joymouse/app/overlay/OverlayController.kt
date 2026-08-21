@@ -237,6 +237,23 @@ class OverlayController(private val service: GestureAccessibilityService) {
         scheduleCursorHide()
     }
 
+    /** 播放/暂停：通过当前活跃媒体会话的 TransportControls 控制 */
+    fun toggleMediaPlayPause() {
+        try {
+            val msm = ctx.getSystemService(Context.MEDIA_SESSION_SERVICE) as? android.media.session.MediaSessionManager ?: return
+            val session = msm.getActiveSessions(null).firstOrNull {
+                it.controller.playbackState?.state?.let { s ->
+                    s != android.media.session.PlaybackState.STATE_NONE
+                } == true
+            } ?: return
+            val playing = session.controller.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
+            if (playing) session.controller.transportControls.pause()
+            else session.controller.transportControls.play()
+        } catch (t: Throwable) {
+            t.printStackTrace()
+        }
+    }
+
     /** 光标样式着色（orange/white/red/green/blue/black） */
     private fun applyCursorStyle(iv: ImageView) {
         val tint = when (config.cursorStyle) {
@@ -687,6 +704,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
                 (ctx.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager)
                     ?.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.ADJUST_MUTE, 0)
             }
+            // 播放/暂停：通过活跃媒体会话控制
+            Action.MEDIA_PLAY_PAUSE -> toggleMediaPlayPause()
             // 快进/快退：双击屏幕右侧 80% / 左侧 20% 宽度处（参考应用行为，适配视频类 App 点按区）
             Action.MEDIA_FORWARD -> s.doubleTap(screenW * 0.8f, cursorY)
             Action.MEDIA_REWIND -> s.doubleTap(screenW * 0.2f, cursorY)

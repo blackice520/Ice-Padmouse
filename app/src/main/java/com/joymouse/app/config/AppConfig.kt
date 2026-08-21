@@ -24,6 +24,7 @@ enum class Action(val id: String, val label: String, val isGlobal: Boolean = fal
     VOLUME_UP("vol_up", "音量加", true),
     VOLUME_DOWN("vol_down", "音量减", true),
     MUTE("mute", "静音", true),
+    MEDIA_PLAY_PAUSE("media_play_pause", "播放/暂停"),
     MEDIA_FORWARD("media_forward", "快进（双击屏右 80% 处）"),
     MEDIA_REWIND("media_rewind", "快退（双击屏左 20% 处）"),
     TOGGLE_MOUSE("toggle_mouse", "显示/隐藏鼠标"),
@@ -55,6 +56,7 @@ fun Action.shortLabel(): String = when (this) {
     Action.VOLUME_UP -> "音量+"
     Action.VOLUME_DOWN -> "音量-"
     Action.MUTE -> "静音"
+    Action.MEDIA_PLAY_PAUSE -> "播放"
     Action.MEDIA_FORWARD -> "快进"
     Action.MEDIA_REWIND -> "快退"
     Action.TOGGLE_MOUSE -> "鼠标"
@@ -93,6 +95,7 @@ data class AppConfig(
     var vibrationIntensity: Int = 255, // 振动强度 0..255
     var toggleKey: String = "l3",      // 唤出/关闭鼠标的手柄键
     var buttonsVisible: Boolean = true,// 自定义按键是否显示
+    var mappingVersion: Int = 2,       // 默认映射版本（用于升级迁移）
     var gamepadMap: MutableMap<String, String> = mutableMapOf(), // 手柄键名 -> 动作 id
     var buttons: MutableList<MappedButton> = mutableListOf()
 ) {
@@ -131,6 +134,7 @@ data class AppConfig(
             .put("vibrationIntensity", vibrationIntensity)
             .put("toggleKey", toggleKey)
             .put("buttonsVisible", buttonsVisible)
+            .put("mappingVersion", mappingVersion)
             .put("gamepadMap", gm)
             .put("buttons", arr)
     }
@@ -160,6 +164,7 @@ data class AppConfig(
                 cfg.vibrationIntensity = o.optInt("vibrationIntensity", 255).coerceIn(0, 255)
                 cfg.toggleKey = o.optString("toggleKey", "l3")
                 cfg.buttonsVisible = o.optBoolean("buttonsVisible", true)
+                cfg.mappingVersion = o.optInt("mappingVersion", 1)
                 val gm = o.optJSONObject("gamepadMap")
                 if (gm != null) {
                     val it = gm.keys()
@@ -205,6 +210,14 @@ object ConfigStore {
         val cfg = AppConfig.fromJson(sp.getString(KEY, null))
         if (cfg.buttons.isEmpty()) cfg.buttons.addAll(defaultButtons())
         if (cfg.gamepadMap.isEmpty()) cfg.gamepadMap.putAll(defaultGamepadMap())
+        // v2 迁移：用户定制 X=唤出/隐藏光标, Y=播放/暂停, B=返回
+        if (cfg.mappingVersion < 2) {
+            cfg.gamepadMap["a"] = "click"
+            cfg.gamepadMap["b"] = "back"
+            cfg.gamepadMap["x"] = "toggle_mouse"
+            cfg.gamepadMap["y"] = "media_play_pause"
+            cfg.mappingVersion = 2
+        }
         cached = cfg
         return cfg
     }
@@ -224,14 +237,14 @@ object ConfigStore {
 
     /**
      * 手柄默认映射（键名 -> 动作 id）。
-     * 参考 gamepad mouse 的默认设置：十字键=音量/媒体，L1=静音，R2=截屏，
-     * A=单击 B=长按(右键) X=双击 Y=滚轮上，L3=唤出/关闭鼠标，Start/Select=最近任务/主页。
+     * v2（用户定制）：A=单击 B=返回 X=唤出/隐藏光标 Y=播放/暂停，
+     * 其余对齐参考应用：L1=静音 R2=截屏 十字键=音量/媒体，L3=唤出键。
      */
     fun defaultGamepadMap(): Map<String, String> = linkedMapOf(
         "a" to "click",
-        "b" to "longpress",
-        "x" to "dblclick",
-        "y" to "scroll_up",
+        "b" to "back",
+        "x" to "toggle_mouse",
+        "y" to "media_play_pause",
         "lb" to "mute",
         "rb" to "noop",
         "lt" to "noop",

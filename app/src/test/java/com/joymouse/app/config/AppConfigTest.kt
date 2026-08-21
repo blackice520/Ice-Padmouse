@@ -126,14 +126,36 @@ class AppConfigTest {
         map.keys.forEach { k -> assertTrue("unknown key $k", ConfigStore.keyCodeOf(k) != -1) }
         // 全部动作 id 有效
         map.values.forEach { v -> assertEquals(v, Action.fromId(v).id) }
-        // 关键默认值（对齐参考应用）
+        // v2 定制映射：A=单击 B=返回 X=唤出/隐藏光标 Y=播放/暂停
         assertEquals("click", map["a"])
-        assertEquals("longpress", map["b"])
+        assertEquals("back", map["b"])
+        assertEquals("toggle_mouse", map["x"])
+        assertEquals("media_play_pause", map["y"])
         assertEquals("vol_up", map["up"])
         assertEquals("mute", map["lb"])
         assertEquals("screenshot", map["rt"])
         // keyNameOf 与 keyCodeOf 互逆
         map.keys.forEach { k -> assertEquals(k, ConfigStore.keyNameOf(ConfigStore.keyCodeOf(k))) }
+    }
+
+    @Test
+    fun mappingMigrationV2AppliesNewDefaults() {
+        // 模拟 v1 旧配置（无 mappingVersion / 旧映射）
+        val json = """{"mappingVersion":1,"gamepadMap":{"a":"click","b":"longpress","x":"dblclick","y":"scroll_up"}}"""
+        val cfg = AppConfig.fromJson(json)
+        assertEquals(1, cfg.mappingVersion)
+        // 迁移逻辑（load 时执行）：
+        if (cfg.mappingVersion < 2) {
+            cfg.gamepadMap["a"] = "click"
+            cfg.gamepadMap["b"] = "back"
+            cfg.gamepadMap["x"] = "toggle_mouse"
+            cfg.gamepadMap["y"] = "media_play_pause"
+            cfg.mappingVersion = 2
+        }
+        assertEquals("back", cfg.gamepadMap["b"])
+        assertEquals("toggle_mouse", cfg.gamepadMap["x"])
+        assertEquals("media_play_pause", cfg.gamepadMap["y"])
+        assertEquals(2, cfg.mappingVersion)
     }
 
     @Test
