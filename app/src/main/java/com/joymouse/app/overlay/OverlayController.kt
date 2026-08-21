@@ -589,6 +589,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
                 dispatch { ok ->
                     if (!ok && attempts < 5) {
                         tickHandler.postDelayed(this, 220)
+                    } else if (!ok) {
+                        android.util.Log.w("JoyMouse", "注入手势失败(已重试5次)")
                     }
                 }
             }
@@ -1070,7 +1072,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
         bar.addView(barKey("完成编辑") { setEditing(false) })
         editBarParams = baseParams(WindowManager.LayoutParams.WRAP_CONTENT, dp(44)).apply {
             gravity = Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
-            y = dp(24)
+            y = dp(56) // 避开手势导航条区域
         }
         wm.addView(bar, editBarParams)
         editBar = bar

@@ -25,24 +25,16 @@ class ActionPicker(private val controller: OverlayController) {
     fun showFor(btn: MappedButton) {
         hide()
         target = btn
+        android.util.Log.i("ActionPicker", "showFor: ${btn.label} id=${btn.id}")
         val col = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
             background = controller.roundedDrawable(Color.argb(250, 245, 245, 245), 14f)
             elevation = 12f * density
             setPadding(controller.dp(4), controller.dp(4), controller.dp(4), controller.dp(4))
-            // 点面板外部任意位置 = 取消
-            setOnTouchListener { _, e ->
-                if (e.actionMasked == android.view.MotionEvent.ACTION_OUTSIDE) {
-                    hide()
-                    true
-                } else {
-                    false
-                }
-            }
         }
         col.addView(header("编辑按键：${btn.label}（当前：${btn.action.label}）"))
 
-        // 取消：放在顶部且加大，避免屏幕底部手势条遮挡导致点不到
+        // 取消：置顶、加大，同时挂点击+触摸双监听（触摸抬起即关闭，双保险）
         col.addView(TextView(ctx).apply {
             text = "取消（不修改）"
             textSize = 15f
@@ -53,6 +45,14 @@ class ActionPicker(private val controller: OverlayController) {
                 LinearLayout.LayoutParams.MATCH_PARENT, controller.dp(44)
             ).apply { setMargins(controller.dp(3), controller.dp(2), controller.dp(3), controller.dp(2)) }
             setOnClickListener { hide() }
+            setOnTouchListener { _, e ->
+                if (e.actionMasked == android.view.MotionEvent.ACTION_UP) {
+                    hide()
+                    true
+                } else {
+                    false
+                }
+            }
         })
 
         // 尺寸调节
@@ -90,16 +90,15 @@ class ActionPicker(private val controller: OverlayController) {
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-                WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             android.graphics.PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
             var px = (btn.x * controller.screenW).toInt() + controller.dp(60)
             var py = (btn.y * controller.screenH).toInt() - h / 2
             px = px.coerceIn(controller.dp(4), controller.screenW - w - controller.dp(4))
-            // 底部留出导航条空间，保证"取消/删除"按钮不会被手势条遮挡
-            py = py.coerceIn(controller.dp(4), controller.screenH - h - controller.dp(56))
+            // 顶部/底部都留出状态栏/导航条空间，保证"取消/删除"按钮不被系统 UI 遮挡
+            py = py.coerceIn(controller.dp(64), controller.screenH - h - controller.dp(56))
             x = px
             y = py
         }
@@ -108,7 +107,14 @@ class ActionPicker(private val controller: OverlayController) {
     }
 
     fun hide() {
-        window?.let { runCatching { wm.removeView(it) } }
+        android.util.Log.i("ActionPicker", "hide: window=${window != null}")
+        window?.let {
+            try {
+                wm.removeView(it)
+            } catch (t: Throwable) {
+                android.util.Log.w("ActionPicker", "removeView failed: $t")
+            }
+        }
         window = null
         params = null
         target = null
