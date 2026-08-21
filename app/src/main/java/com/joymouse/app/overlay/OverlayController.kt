@@ -211,7 +211,17 @@ class OverlayController(private val service: GestureAccessibilityService) {
         val iv = ImageView(ctx)
         iv.setImageResource(R.drawable.ic_cursor_dot)
         applyCursorStyle(iv)
-        cursorParams = baseParams(size, size).apply {
+        // 关键：光标窗口必须 FLAG_NOT_TOUCHABLE！
+        // 否则注入的点击会打在自己光标窗口上被吞掉（参考应用 flags=792 即含 NOT_TOUCHABLE）
+        cursorParams = WindowManager.LayoutParams(
+            size, size,
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            android.graphics.PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
             x = (cursorX - size / 2f).toInt()
             y = (cursorY - size / 2f).toInt()
         }
@@ -586,6 +596,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
             override fun run() {
                 if (attempts >= 5) return
                 attempts++
+                // 每次注入前刷新活动时间：注入手势本身也会触发触摸休眠检测，避免被误判为"用户触摸"而关闭鼠标
+                lastActivity = System.currentTimeMillis()
                 dispatch { ok ->
                     if (!ok && attempts < 5) {
                         tickHandler.postDelayed(this, 220)
@@ -616,6 +628,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
         } else {
             injectWithRetry { cb -> GestureAccessibilityService.instance?.tap(tx, ty, onResult = cb) }
         }
+        // 点击也是活动：重置光标自动隐藏计时
+        scheduleCursorHide()
         haptic()
     }
 
