@@ -1,6 +1,7 @@
 package com.joymouse.app.service
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.accessibilityservice.GestureDescription.StrokeDescription
 import android.content.Context
@@ -34,6 +35,19 @@ class GestureAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        // 运行时动态开启 filterKeyEvents（对齐参考应用 Gamepad Mouse）：
+        // 在 XML 里静态声明 accessibilityFlags 会被 MagicOS 无障碍看门狗判定高危并强停，
+        // 改为运行时 setServiceInfo 设置 FLAG_REQUEST_FILTER_KEY_EVENTS，让鼠标休眠时仍能
+        // 全局收到唤出键(L3)，同时避免静态声明触发看门狗。
+        try {
+            serviceInfo = AccessibilityServiceInfo().apply {
+                eventTypes = AccessibilityEvent.TYPES_ALL_MASK
+                feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
+                notificationTimeout = 100
+                flags = AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
+            }
+        } catch (_: Throwable) {
+        }
         // 启动标记：验证按键日志写入路径是否可用
         try {
             java.io.FileOutputStream(java.io.File(filesDir, "keys.log"), true).use {
@@ -91,6 +105,16 @@ class GestureAccessibilityService : AccessibilityService() {
         }
     }
 
+    /** 手势注入/系统动作落盘：用于诊断看门狗强杀与注入行为的时序关联 */
+    private fun logGesture(tag: String, detail: String) {
+        try {
+            val line = "${System.currentTimeMillis()} [$tag] $detail\n"
+            java.io.FileOutputStream(java.io.File(filesDir, "gestures.log"), true)
+                .use { it.write(line.toByteArray()) }
+        } catch (_: Throwable) {
+        }
+    }
+
     override fun onConfigurationChanged(config: android.content.res.Configuration) {
         super.onConfigurationChanged(config)
         OverlayController.instance?.onConfigurationChanged()
@@ -111,16 +135,24 @@ class GestureAccessibilityService : AccessibilityService() {
         Path().apply { moveTo(x1, y1); lineTo(x2, y2) }
 
     private fun dispatch(builder: GestureDescription.Builder, onResult: ((Boolean) -> Unit)? = null): Boolean {
+        logGesture("dispatch", "send")
         return try {
             dispatchGesture(
                 builder.build(),
                 object : GestureResultCallback() {
-                    override fun onCompleted(g: GestureDescription?) { onResult?.invoke(true) }
-                    override fun onCancelled(g: GestureDescription?) { onResult?.invoke(false) }
+                    override fun onCompleted(g: GestureDescription?) {
+                        logGesture("dispatch", "completed")
+                        onResult?.invoke(true)
+                    }
+                    override fun onCancelled(g: GestureDescription?) {
+                        logGesture("dispatch", "cancelled")
+                        onResult?.invoke(false)
+                    }
                 },
                 handler
             )
         } catch (t: Throwable) {
+            logGesture("dispatch", "exception=${t.javaClass.simpleName}")
             onResult?.invoke(false)
             false
         }
@@ -232,6 +264,7 @@ class GestureAccessibilityService : AccessibilityService() {
     // ---------------- 全局系统动作 ----------------
 
     fun performGlobal(action: Action) {
+        logGesture("global", action.id)
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         when (action) {
             Action.HOME -> performGlobalAction(GLOBAL_ACTION_HOME)

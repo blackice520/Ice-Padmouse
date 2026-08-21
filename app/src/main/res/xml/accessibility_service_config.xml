@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 对齐参考应用(Gamepad Mouse)的配置：typeAllMask + canRetrieveWindowContent，
-     保证 filterKeyEvents 在国产 ROM 上生效（服务全局按键通道） -->
+<!-- 对齐参考应用(Gamepad Mouse)的配置。
+     canRequestFilterKeyEvents=true 仅声明能力；真正的 filterKeyEvents 在运行时通过
+     setServiceInfo() 动态开启（见 GestureAccessibilityService.onServiceConnected），
+     避免在 XML 里静态声明 accessibilityFlags 触发 MagicOS 无障碍看门狗强停。 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeAllMask"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagDefault|flagRequestFilterKeyEvents"
     android:canPerformGestures="true"
     android:canRequestFilterKeyEvents="true"
     android:canRetrieveWindowContent="true"

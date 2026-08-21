@@ -124,6 +124,11 @@ class OverlayController(private val service: GestureAccessibilityService) {
     private var lastScrollCancel = 0L
     /** 连续滚动次数：防止持续注入手势触发 MagicOS 无障碍看门狗（会导致应用被强制停止+服务被吊销） */
     private var scrollChainCount = 0
+    /** 滚动链达到单轮上限后的冷却截止时间戳（冷却内不再注入，进一步避开看门狗） */
+    private var scrollChainCooldownUntil = 0L
+    /** 虚拟摇杆滚轮模式的连续注入计数与冷却（独立于右摇杆，避免互相干扰） */
+    private var vScrollCount = 0
+    private var vScrollCooldownUntil = 0L
     /** 触摸休眠冷却：鼠标刚关闭 1.5 秒内忽略触摸，避免反复开关 */
     private var lastOutsideDismiss = 0L
     /** 左键按下状态机：held=按下，dragging=已转拖拽 */
@@ -790,6 +795,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                     WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
                     WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
+                // 鼠标未激活时焦点窗不聚焦（对齐参考应用）：触摸/按键穿透给下层应用，手指才能正常操作
                 if (!mouseActive) flags = flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 x = 0
                 y = 0
@@ -803,7 +809,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
         }
     }
 
-    /** 焦点窗聚焦状态随鼠标开关切换 */
+    /** 焦点窗聚焦状态随鼠标开关切换（对齐参考应用） */
     private fun applyFocusViewFocusable(focusable: Boolean) {
         val v = gamepadView ?: return
         val p = gamepadParams ?: return
@@ -855,7 +861,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
             vJoyX = 0f
             vJoyY = 0f
             vJoySpeed = 0f
-            // 鼠标关闭：焦点窗让出，游戏/应用直接收到手柄按键
+            // 鼠标关闭：焦点窗让出焦点（FLAG_NOT_FOCUSABLE），触摸/按键穿透给下层应用，手指恢复正常操作
             applyFocusViewFocusable(false)
         }
         refreshModeButtons()
@@ -906,6 +912,16 @@ class OverlayController(private val service: GestureAccessibilityService) {
         try {
             val line = "${System.currentTimeMillis()} [$from] code=$keyCode name=$name down=$down\n"
             java.io.FileOutputStream(java.io.File(ctx.filesDir, "keys.log"), true)
+                .use { it.write(line.toByteArray()) }
+        } catch (_: Throwable) {
+        }
+    }
+
+    /** 滚动状态落盘诊断：定位看门狗上限为何失效 */
+    private fun logScroll(msg: String) {
+        try {
+            val line = "${System.currentTimeMillis()} [scroll] $msg\n"
+            java.io.FileOutputStream(java.io.File(ctx.filesDir, "scroll.log"), true)
                 .use { it.write(line.toByteArray()) }
         } catch (_: Throwable) {
         }
@@ -982,7 +998,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
 
     fun performGlobalThrottled(action: Action) {
         val now = System.currentTimeMillis()
-        if (now - lastGlobalActionTime < 250) return
+        // 1000ms 冷却：全局动作（主页/返回/最近任务/截屏）频繁调用是看门狗高危触发点
+        if (now - lastGlobalActionTime < 1000) return
         lastGlobalActionTime = now
         GestureAccessibilityService.instance?.performGlobal(action)
     }
@@ -1099,14 +1116,23 @@ class OverlayController(private val service: GestureAccessibilityService) {
                     g.dragMove(cursorX, cursorY)
                 }
             }
-            // 虚拟摇杆滚轮模式：垂直偏转 → 滚动
+            // 虚拟摇杆滚轮模式：垂直偏转 → 滚动（同样加看门狗防护：每轮最多 6 次 + 1.2s 冷却）
             if (mode == Mode.SCROLL && kotlin.math.abs(vJoyY) > 0.35f && !leftHeld) {
-                if (now - lastScrollTime > 150) {
+                if (vScrollCount >= 6) {
+                    vScrollCooldownUntil = now + 1200
+                    vScrollCount = 0
+                }
+                if (now >= vScrollCooldownUntil && now - lastScrollTime > 150) {
                     lastScrollTime = now
+                    vScrollCount++
                     val step = (cfg.scrollStep * cfg.scrollSpeed / 100f).toInt().coerceAtLeast(80)
                     s.scrollAt(cursorX, cursorY, step, up = vJoyY < 0)
                     lastActivity = now
                 }
+            } else if (kotlin.math.abs(vJoyY) <= 0.35f) {
+                // 虚拟摇杆回中 → 重置其滚动计数与冷却
+                vScrollCount = 0
+                vScrollCooldownUntil = 0L
             }
         }
 
@@ -1127,7 +1153,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
             }
         }
 
-        // 4) 右摇杆 → 链式滚动（参考应用方案）
+        // 4) 右摇杆 → 链式滚动（参考应用方案，已加看门狗防护）
         //    派发一个滑动，完成回调后立即派发下一个 → 连续无间隙的滚动流；
         //    方向跟随摇杆（摇杆向下=手指上滑=页面下滚），长度随推杆幅度与滚动速度设置变化
         val scrollLen = hypot(scrollX, scrollY)
@@ -1135,15 +1161,21 @@ class OverlayController(private val service: GestureAccessibilityService) {
         if (scrollLen > scrollDead && !leftHeld && !scrollGestureBusy) {
             // 手势被取消后退避 300ms：避免与真实触摸形成"派发-取消"风暴
             if (now - lastScrollCancel < 300) return
-            // 连续注入保护：连续 12 次手势（约 2.5 秒）后暂停，需摇杆回中恢复。
-            // 防止持续注入触发系统无障碍看门狗（应用会被强制停止并吊销服务）
-            if (scrollChainCount >= 12) return
+            // 看门狗防护：每轮最多连续注入 6 次滑动（约 0.8 秒），之后强制 1.2 秒冷却。
+            // 连续注入会触发系统无障碍看门狗（应用被强制停止并吊销服务）。
+            if (scrollChainCount >= 6) {
+                scrollChainCooldownUntil = now + 1200
+                scrollChainCount = 0
+                logScroll("COOLDOWN set until=${scrollChainCooldownUntil} now=$now")
+            }
+            if (now < scrollChainCooldownUntil) return
             val norm = ((scrollLen - scrollDead) / (1f - scrollDead)).coerceIn(0f, 1f)
             val len = (cfg.scrollStep * cfg.scrollSpeed / 100f * (0.8f + norm * 0.5f)).coerceAtLeast(120f)
             val dirX = scrollX / scrollLen
             val dirY = scrollY / scrollLen
             scrollGestureBusy = true
             scrollChainCount++
+            logScroll("dispatch count=$scrollChainCount len=$scrollLen dead=$scrollDead cooldownUntil=$scrollChainCooldownUntil this=${this.hashCode()}")
             lastActivity = now
             val dispatched = s.swipe(cursorX, cursorY, cursorX - dirX * len, cursorY - dirY * len, 130) { ok ->
                 if (!ok) lastScrollCancel = System.currentTimeMillis()
@@ -1154,9 +1186,13 @@ class OverlayController(private val service: GestureAccessibilityService) {
                 scrollGestureBusy = false
                 lastScrollCancel = System.currentTimeMillis()
             }
-        } else {
-            // 摇杆回中/松开 → 重置连续计数
+        } else if (scrollLen <= scrollDead) {
+            // 摇杆真正回中 → 才重置连续计数与冷却（busy 状态下不得清零，否则上限形同虚设）
+            if (scrollChainCount != 0 || scrollChainCooldownUntil != 0L) {
+                logScroll("RESET count=$scrollChainCount cooldownUntil=$scrollChainCooldownUntil")
+            }
             scrollChainCount = 0
+            scrollChainCooldownUntil = 0L
         }
 
         // 5) 空闲超时自动关闭鼠标

@@ -1,4 +1,4 @@
-# JoyMouse 手柄鼠标映射（Android）
+# JoyMouse 手柄鼠标映射（Android）· v1.1
 
 在手机上模拟电脑鼠标操作的免 root 手柄/按键映射应用。
 功能与架构参考 [Gamepad Mouse](docs/reference-analysis.md)（已逆向分析其 APK，独立实现）。
@@ -27,9 +27,10 @@
 
 | 权限 | 用途 |
 |------|------|
-| 无障碍服务（手势模拟） | `dispatchGesture` 注入点击/拖拽/滑动手势；光标与手柄捕获使用无障碍专用窗口 `TYPE_ACCESSIBILITY_OVERLAY`（**不需要**"显示在其他应用上层"权限）；`filterKeyEvents` 全局响应唤出键（L3） |
+| 无障碍服务（手势模拟） | `dispatchGesture` 注入点击/拖拽/滑动手势；光标与手柄捕获使用无障碍专用窗口 `TYPE_ACCESSIBILITY_OVERLAY`（**不需要**"显示在其他应用上层"权限）；`filterKeyEvents` 在**运行时** `setServiceInfo` 动态开启，用于鼠标休眠时全局响应唤出键（L3） |
 
-> 无障碍服务不读取屏幕内容（`canRetrieveWindowContent="false"`），仅在操作时注入手势。
+> 无障碍服务不读取屏幕内容（`onAccessibilityEvent` 为空），仅在操作时注入手势。
+> `filterKeyEvents` 不在 XML 里静态声明（`accessibilityFlags`），避免被 MagicOS 无障碍看门狗判定高危强停——见 `GestureAccessibilityService.onServiceConnected`。
 
 ## 技术要点
 
@@ -82,6 +83,15 @@ adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
 安装后在 App 内依次开启两项权限即可使用。
+
+## 更新日志
+
+### v1.1
+
+- **修复闪退**：根因是 MagicOS 无障碍看门狗对「XML 静态声明 `flagRequestFilterKeyEvents`（全局按键拦截）+ 读屏幕内容 + 注入手势」判定高危，每隔 1~2 分钟强停应用。改为在运行时 `setServiceInfo` 动态开启 filterKeyEvents，仅用于鼠标休眠时响应 L3 唤出。
+- **修复手指无法操作**：焦点窗改为跟随鼠标开关切换聚焦（鼠标关闭即 `FLAG_NOT_FOCUSABLE`，触摸/按键穿透给下层应用）。
+- **修复滚动限流失效**：`scrollGestureBusy` 曾把滚动计数清零导致限流形同虚设，改为只在摇杆真正回中时重置；右摇杆/虚拟摇杆滚动加 6 次上限 + 1.2s 冷却。
+- 全局系统动作（主页/返回/最近任务/截屏）限流提高到 1000ms。
 
 ## 项目结构
 
