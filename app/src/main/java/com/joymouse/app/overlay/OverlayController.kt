@@ -242,13 +242,13 @@ class OverlayController(private val service: GestureAccessibilityService) {
         try {
             val msm = ctx.getSystemService(Context.MEDIA_SESSION_SERVICE) as? android.media.session.MediaSessionManager ?: return
             val session = msm.getActiveSessions(null).firstOrNull {
-                it.controller.playbackState?.state?.let { s ->
+                it.playbackState?.state?.let { s ->
                     s != android.media.session.PlaybackState.STATE_NONE
                 } == true
             } ?: return
-            val playing = session.controller.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
-            if (playing) session.controller.transportControls.pause()
-            else session.controller.transportControls.play()
+            val playing = session.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
+            if (playing) session.transportControls.pause()
+            else session.transportControls.play()
         } catch (t: Throwable) {
             t.printStackTrace()
         }
