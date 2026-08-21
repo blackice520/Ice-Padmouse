@@ -29,6 +29,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvAccelValue: TextView
     private lateinit var tvOpacityValue: TextView
     private lateinit var tvDeadzoneValue: TextView
+    private lateinit var tvGamepadSpeedValue: TextView
     private lateinit var tvStyleValue: TextView
     private lateinit var diagram: GamepadDiagramView
 
@@ -50,6 +51,7 @@ class MainActivity : AppCompatActivity() {
         tvAccelValue = findViewById(R.id.tvAccelValue)
         tvOpacityValue = findViewById(R.id.tvOpacityValue)
         tvDeadzoneValue = findViewById(R.id.tvDeadzoneValue)
+        tvGamepadSpeedValue = findViewById(R.id.tvGamepadSpeedValue)
         tvStyleValue = findViewById(R.id.tvStyleValue)
         diagram = findViewById(R.id.diagram)
 
@@ -142,6 +144,21 @@ class MainActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(sb: SeekBar?) {}
         })
         tvDeadzoneValue.text = "${config.deadzone}%"
+
+        // 手柄摇杆速度（1..100）
+        val sbGamepadSpeed = findViewById<SeekBar>(R.id.sbGamepadSpeed)
+        sbGamepadSpeed.max = 100
+        sbGamepadSpeed.progress = config.mouseSpeed.coerceIn(1, 100)
+        sbGamepadSpeed.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
+                config.mouseSpeed = p.coerceAtLeast(1)
+                tvGamepadSpeedValue.text = "${config.mouseSpeed}"
+                ConfigStore.save(this@MainActivity, config)
+            }
+            override fun onStartTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) {}
+        })
+        tvGamepadSpeedValue.text = "${config.mouseSpeed}"
         tvStyleValue.text = cursorStyles.firstOrNull { it.first == config.cursorStyle }?.second ?: "橙"
 
         val swAutoHide = findViewById<SwitchCompat>(R.id.swCursorAutoHide)

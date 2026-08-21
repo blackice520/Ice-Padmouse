@@ -344,6 +344,37 @@
                     android:textColor="#333333" />
             </LinearLayout>
 
+            <!-- 手柄摇杆速度 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/label_gamepad_speed"
+                android:textSize="14sp"
+                android:textColor="#333333" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <SeekBar
+                    android:id="@+id/sbGamepadSpeed"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1" />
+
+                <TextView
+                    android:id="@+id/tvGamepadSpeedValue"
+                    android:layout_width="48dp"
+                    android:layout_height="wrap_content"
+                    android:text="50"
+                    android:textSize="14sp"
+                    android:gravity="end"
+                    android:textColor="#333333" />
+            </LinearLayout>
+
             <!-- 面板透明度 -->
             <TextView
                 android:layout_width="wrap_content"

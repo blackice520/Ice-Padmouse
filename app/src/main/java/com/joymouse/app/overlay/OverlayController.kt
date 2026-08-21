@@ -867,12 +867,15 @@ class OverlayController(private val service: GestureAccessibilityService) {
         }
 
         // 1) 左摇杆 → 光标速度（死区 + 幂次曲线）
+        //    曲线: v = norm^exp, exp = 2.5 - sensitivity*0.015（1..2.5）
+        //    灵敏度越高 exp 越低 → 越线性（低偏转响应越快）。
+        //    恒为正且单调 —— 修复参考应用公式在默认灵敏度下产生负速度导致的"反向乱飘"
         val dead = cfg.deadzone / 100f
         val len = hypot(stickX, stickY)
         if (len > dead) {
             val norm = ((len - dead) / (1f - dead)).coerceIn(0f, 1f)
-            val curve = ((cfg.sensitivity - 1) / 2f)
-            val v = (norm.toDouble().pow(2.5).toFloat() * curve * 0.9f) + ((1f - curve * 0.9f) * norm)
+            val exp = (2.5f - (cfg.sensitivity / 100f) * 1.5f).coerceIn(1f, 2.5f)
+            val v = norm.toDouble().pow(exp.toDouble()).toFloat()
             val speedPx = (cfg.mouseSpeed / 100f) * 2.4f * density * 16f // 每 tick 位移
             val dx = (stickX / len) * v * speedPx
             val dy = (stickY / len) * v * speedPx
