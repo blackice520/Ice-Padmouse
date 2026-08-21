@@ -4,6 +4,8 @@
     <string name="accessibility_service_label">JoyMouse 手势模拟服务</string>
     <string name="accessibility_service_desc">用于在屏幕上模拟触摸手势（点击、双击、长按、拖拽、滑动、滚动），配合悬浮控制台与蓝牙/USB 手柄把按键映射为鼠标操作。本服务不读取屏幕内容，仅在您操作时注入手势。</string>
 
+    <string name="virtual_title">虚拟按键</string>
+    <string name="virtual_subtitle">手柄图例：每个按键显示当前功能，点按即可修改映射</string>
     <string name="title_main">JoyMouse 手柄鼠标映射</string>
     <string name="subtitle_main">在手机上模拟电脑鼠标：虚拟摇杆移动光标，物理手柄摇杆/按键映射鼠标，自定义按键实现点击 / 拖拽 / 滑动 / 系统操作</string>
     <string name="card_access">无障碍服务（手势模拟，唯一必需权限）</string>

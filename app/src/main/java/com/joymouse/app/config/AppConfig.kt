@@ -35,6 +35,33 @@ enum class Action(val id: String, val label: String, val isGlobal: Boolean = fal
     }
 }
 
+/** 动作的短标签（用于手柄图例等紧凑场景） */
+fun Action.shortLabel(): String = when (this) {
+    Action.CLICK -> "单击"
+    Action.DOUBLE_CLICK -> "双击"
+    Action.LONG_PRESS -> "长按"
+    Action.SWIPE_UP -> "上滑"
+    Action.SWIPE_DOWN -> "下滑"
+    Action.SWIPE_LEFT -> "左滑"
+    Action.SWIPE_RIGHT -> "右滑"
+    Action.SCROLL_UP -> "滚上"
+    Action.SCROLL_DOWN -> "滚下"
+    Action.HOME -> "主页"
+    Action.BACK -> "返回"
+    Action.RECENTS -> "任务"
+    Action.SCREENSHOT -> "截屏"
+    Action.NOTIFICATIONS -> "通知"
+    Action.QUICK_SETTINGS -> "快捷"
+    Action.VOLUME_UP -> "音量+"
+    Action.VOLUME_DOWN -> "音量-"
+    Action.MUTE -> "静音"
+    Action.MEDIA_FORWARD -> "快进"
+    Action.MEDIA_REWIND -> "快退"
+    Action.TOGGLE_MOUSE -> "鼠标"
+    Action.TOGGLE_PANEL -> "面板"
+    Action.NOOP -> "无"
+}
+
 /** 一个可自定义的悬浮按键。x/y 为相对屏幕的百分比坐标 (0..1)。 */
 data class MappedButton(
     val id: Long,

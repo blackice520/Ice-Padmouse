@@ -5,15 +5,18 @@ import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.provider.Settings
+import android.view.View
 import android.view.accessibility.AccessibilityManager
 import android.widget.Button
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.widget.SwitchCompat
+import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.joymouse.app.config.Action
 import com.joymouse.app.config.ConfigStore
 import com.joymouse.app.overlay.OverlayController
@@ -26,6 +29,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvOpacityValue: TextView
     private lateinit var tvDeadzoneValue: TextView
     private lateinit var tvStyleValue: TextView
+    private lateinit var diagram: GamepadDiagramView
 
     private val cursorStyles = listOf(
         "orange" to "橙",
@@ -45,6 +49,21 @@ class MainActivity : AppCompatActivity() {
         tvOpacityValue = findViewById(R.id.tvOpacityValue)
         tvDeadzoneValue = findViewById(R.id.tvDeadzoneValue)
         tvStyleValue = findViewById(R.id.tvStyleValue)
+        diagram = findViewById(R.id.diagram)
+
+        // 手柄图例：点按键 → 选择动作
+        diagram.onKeyTap = { key -> showMappingPickerFor(key) }
+
+        // 底部导航切换分区
+        val pageVirtual = findViewById<View>(R.id.pageVirtual)
+        val pageMapping = findViewById<ScrollView>(R.id.pageMapping)
+        val pageSettings = findViewById<ScrollView>(R.id.pageSettings)
+        findViewById<BottomNavigationView>(R.id.bottomNav).setOnNavigationItemSelectedListener { item ->
+            pageVirtual.visibility = if (item.itemId == R.id.nav_virtual) View.VISIBLE else View.GONE
+            pageMapping.visibility = if (item.itemId == R.id.nav_mapping) View.VISIBLE else View.GONE
+            pageSettings.visibility = if (item.itemId == R.id.nav_settings) View.VISIBLE else View.GONE
+            true
+        }
 
         findViewById<Button>(R.id.btnAccess).setOnClickListener {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
@@ -93,7 +112,6 @@ class MainActivity : AppCompatActivity() {
         })
         tvOpacityValue.text = "${(config.panelOpacity * 100).toInt()}%"
 
-        // 手柄摇杆死区
         val sbDeadzone = findViewById<SeekBar>(R.id.sbDeadzone)
         sbDeadzone.max = 50
         sbDeadzone.progress = config.deadzone.coerceIn(0, 50)
@@ -126,6 +144,86 @@ class MainActivity : AppCompatActivity() {
 
         buildGamepadMapUi()
     }
+
+    override fun onResume() {
+        super.onResume()
+        refreshStatus()
+        diagram.refresh()
+    }
+
+    private fun refreshStatus() {
+        val accessOn = isAccessibilityEnabled()
+        tvAccess.text = if (accessOn) "● 已开启" else "○ 未开启"
+        tvAccess.setTextColor(
+            if (accessOn) getColor(R.color.status_on) else getColor(R.color.status_off)
+        )
+        findViewById<Button>(R.id.btnTogglePanel).text =
+            if (OverlayController.instance?.panelVisible() == true) "隐藏悬浮控制台" else "显示悬浮控制台"
+    }
+
+    private fun isAccessibilityEnabled(): Boolean {
+        val am = getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
+        return am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
+            .any { it.resolveInfo.serviceInfo.packageName == packageName }
+    }
+
+    /** 手柄图例点按键 → 选择动作 */
+    private fun showMappingPickerFor(key: String) {
+        val cfg = ConfigStore.load(this)
+        val keyLabel = keyLabels[key] ?: key
+        val actions = Action.entries.filter {
+            it != Action.TOGGLE_PANEL && it != Action.MEDIA_FORWARD && it != Action.MEDIA_REWIND
+        }
+        val labels = actions.map { it.label }.toTypedArray()
+        val idx = actions.indexOfFirst { it.id == cfg.gamepadMap[key] }.coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle("$keyLabel 的动作")
+            .setSingleChoiceItems(labels, idx) { d, which ->
+                cfg.gamepadMap[key] = actions[which].id
+                ConfigStore.save(this, cfg)
+                diagram.refresh()
+                buildGamepadMapUi()
+                d.dismiss()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun togglePanel() {
+        if (!isAccessibilityEnabled()) {
+            Toast.makeText(this, "请先开启无障碍服务", Toast.LENGTH_SHORT).show()
+            return
+        }
+        var c = OverlayController.instance
+        val svc = GestureAccessibilityService.instance
+        if (c == null && svc != null) {
+            c = OverlayController(svc).also { it.show() }
+        }
+        if (c == null) {
+            Toast.makeText(this, "服务正在启动，请稍候…", Toast.LENGTH_SHORT).show()
+            return
+        }
+        c.togglePanel()
+        refreshStatus()
+    }
+
+    private fun toggleEdit() {
+        val c = OverlayController.instance
+        if (c == null) {
+            Toast.makeText(this, "请先显示悬浮控制台（需要无障碍服务已开启）", Toast.LENGTH_SHORT).show()
+            return
+        }
+        c.setEditing(!c.editMode)
+        refreshStatus()
+    }
+
+    private val keyLabels = mapOf(
+        "a" to "A 键", "b" to "B 键", "x" to "X 键", "y" to "Y 键",
+        "lb" to "L1 肩键", "rb" to "R1 肩键", "lt" to "L2 扳机", "rt" to "R2 扳机",
+        "up" to "十字键 ↑", "down" to "十字键 ↓", "left" to "十字键 ←", "right" to "十字键 →",
+        "start" to "Start 键", "select" to "Select 键", "mode" to "Logo 键", "center" to "十字键确认",
+        "l3" to "左摇杆按下 L3", "r3" to "右摇杆按下 R3",
+    )
 
     /** 手柄按键映射列表：点行 → 选择动作 */
     private fun buildGamepadMapUi() {
@@ -160,41 +258,18 @@ class MainActivity : AppCompatActivity() {
             container.addView(row)
         }
 
-        val keyLabels = mapOf(
-            "a" to "A 键", "b" to "B 键", "x" to "X 键", "y" to "Y 键",
-            "lb" to "L1 肩键", "rb" to "R1 肩键", "lt" to "L2 扳机", "rt" to "R2 扳机",
-            "up" to "十字键 ↑", "down" to "十字键 ↓", "left" to "十字键 ←", "right" to "十字键 →",
-            "start" to "Start 键", "select" to "Select 键", "mode" to "Logo 键", "center" to "十字键确认",
-            "l3" to "左摇杆按下 L3", "r3" to "右摇杆按下 R3",
-        )
-
-        fun actionPicker(title: String, current: String, onPick: (Action) -> Unit) {
-            val actions = Action.entries.filter { it != Action.TOGGLE_PANEL && it != Action.MEDIA_FORWARD && it != Action.MEDIA_REWIND }
-            val labels = actions.map { it.label }.toTypedArray()
-            val idx = actions.indexOfFirst { it.id == current }.coerceAtLeast(0)
-            androidx.appcompat.app.AlertDialog.Builder(this)
-                .setTitle(title)
-                .setSingleChoiceItems(labels, idx) { d, which ->
-                    onPick(actions[which])
-                    d.dismiss()
-                }
-                .setNegativeButton("取消", null)
-                .show()
-        }
-
         // 唤出键（特殊）
         val toggleKeyNames = listOf("l3", "r3", "a", "b", "x", "y", "start", "select", "mode", "center")
         addRow("唤出/关闭鼠标", keyLabels[cfg.toggleKey] ?: cfg.toggleKey) {
             val names = toggleKeyNames.map { keyLabels[it] ?: it }.toTypedArray()
             val idx = toggleKeyNames.indexOf(cfg.toggleKey).coerceAtLeast(0)
-            androidx.appcompat.app.AlertDialog.Builder(this)
+            AlertDialog.Builder(this)
                 .setTitle("唤出/关闭鼠标的键")
                 .setSingleChoiceItems(names, idx) { d, which ->
                     cfg.toggleKey = toggleKeyNames[which]
                     ConfigStore.save(this, cfg)
-                    (container.getChildAt(0) as? LinearLayout)?.getChildAt(1)?.let {
-                        (it as TextView).text = names[which]
-                    }
+                    buildGamepadMapUi()
+                    diagram.refresh()
                     d.dismiss()
                 }
                 .setNegativeButton("取消", null)
@@ -205,65 +280,12 @@ class MainActivity : AppCompatActivity() {
         listOf("a", "b", "x", "y", "lb", "rb", "lt", "rt", "up", "down", "left", "right", "start", "select", "mode", "center")
             .forEach { key ->
                 addRow(keyLabels[key] ?: key, Action.fromId(cfg.gamepadMap[key]).label) {
-                    actionPicker("${keyLabels[key]} 的动作", cfg.gamepadMap[key] ?: "noop") { action ->
-                        cfg.gamepadMap[key] = action.id
-                        ConfigStore.save(this, cfg)
-                        buildGamepadMapUi()
-                    }
+                    showMappingPickerFor(key)
                 }
             }
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
-
-    override fun onResume() {
-        super.onResume()
-        refreshStatus()
-    }
-
-    private fun refreshStatus() {
-        val accessOn = isAccessibilityEnabled()
-        tvAccess.text = if (accessOn) "● 已开启" else "○ 未开启"
-        tvAccess.setTextColor(
-            if (accessOn) getColor(R.color.status_on) else getColor(R.color.status_off)
-        )
-        findViewById<Button>(R.id.btnTogglePanel).text =
-            if (OverlayController.instance?.panelVisible() == true) "隐藏悬浮控制台" else "显示悬浮控制台"
-    }
-
-    private fun isAccessibilityEnabled(): Boolean {
-        val am = getSystemService(Context.ACCESSIBILITY_SERVICE) as AccessibilityManager
-        return am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK)
-            .any { it.resolveInfo.serviceInfo.packageName == packageName }
-    }
-
-    private fun togglePanel() {
-        if (!isAccessibilityEnabled()) {
-            Toast.makeText(this, "请先开启无障碍服务", Toast.LENGTH_SHORT).show()
-            return
-        }
-        var c = OverlayController.instance
-        val svc = GestureAccessibilityService.instance
-        if (c == null && svc != null) {
-            c = OverlayController(svc).also { it.show() }
-        }
-        if (c == null) {
-            Toast.makeText(this, "服务正在启动，请稍候…", Toast.LENGTH_SHORT).show()
-            return
-        }
-        c.togglePanel()
-        refreshStatus()
-    }
-
-    private fun toggleEdit() {
-        val c = OverlayController.instance
-        if (c == null) {
-            Toast.makeText(this, "请先显示悬浮控制台（需要无障碍服务已开启）", Toast.LENGTH_SHORT).show()
-            return
-        }
-        c.setEditing(!c.editMode)
-        refreshStatus()
-    }
 
     /** 供状态栏通知等外部入口复用 */
     companion object {
