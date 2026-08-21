@@ -24,6 +24,7 @@ class AppConfigTest {
             deadzone = 20,
             scrollSpeed = 80,
             mouseTimeout = 90,
+            accelTime = 450,
             cursorStyle = "red",
             swapAB = true,
             hapticEnabled = false,
@@ -50,6 +51,7 @@ class AppConfigTest {
         assertEquals(20, round.deadzone)
         assertEquals(80, round.scrollSpeed)
         assertEquals(90, round.mouseTimeout)
+        assertEquals(450, round.accelTime)
         assertEquals("red", round.cursorStyle)
         assertTrue(round.swapAB)
         assertFalse(round.hapticEnabled)

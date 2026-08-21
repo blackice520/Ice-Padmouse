@@ -282,6 +282,37 @@
                     android:textColor="#333333" />
             </LinearLayout>
 
+            <!-- 摇杆加速时间 -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="@string/label_accel"
+                android:textSize="14sp"
+                android:textColor="#333333" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <SeekBar
+                    android:id="@+id/sbAccel"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1" />
+
+                <TextView
+                    android:id="@+id/tvAccelValue"
+                    android:layout_width="56dp"
+                    android:layout_height="wrap_content"
+                    android:text="300ms"
+                    android:textSize="14sp"
+                    android:gravity="end"
+                    android:textColor="#333333" />
+            </LinearLayout>
+
             <!-- 手柄摇杆死区 -->
             <TextView
                 android:layout_width="wrap_content"

@@ -20,7 +20,8 @@
     <string name="label_swap_ab">交换 A/B 键（A=单击 ↔ B=长按）</string>
     <string name="label_style">光标颜色</string>
     <string name="btn_switch_style">切换</string>
-    <string name="label_speed">虚拟摇杆光标速度</string>
+    <string name="label_speed">虚拟摇杆最大速度</string>
+    <string name="label_accel">摇杆加速时间（起步柔和度，0=立即全速）</string>
     <string name="label_deadzone">手柄摇杆死区</string>
     <string name="label_opacity">控制台透明度</string>
     <string name="guide_title">使用说明</string>

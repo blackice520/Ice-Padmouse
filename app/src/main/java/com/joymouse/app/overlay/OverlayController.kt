@@ -100,6 +100,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
     /** 虚拟摇杆偏转向量（面板摇杆，-1..1，由 tick 处理） */
     private var vJoyX = 0f
     private var vJoyY = 0f
+    /** 虚拟摇杆当前速度系数 0..1（加速度模型，指数逼近目标） */
+    private var vJoySpeed = 0f
     /** 右摇杆滚动方向向量 */
     private var scrollX = 0f
     private var scrollY = 0f
@@ -742,6 +744,9 @@ class OverlayController(private val service: GestureAccessibilityService) {
             stickY = 0f
             scrollX = 0f
             scrollY = 0f
+            vJoyX = 0f
+            vJoyY = 0f
+            vJoySpeed = 0f
         }
         refreshModeButtons()
         haptic()
@@ -875,19 +880,27 @@ class OverlayController(private val service: GestureAccessibilityService) {
             lastActivity = now
         }
 
-        // 2) 虚拟摇杆（面板）→ 光标速度（速度模型：偏转持续生效，推住不放光标一直走）
+        // 2) 虚拟摇杆（面板）→ 光标速度（速度模型 + 加速度）
+        //    偏转持续生效：推住不放光标一直走；速度/加速度均可由用户设置
         if (!editMode) {
             val vDead = 0.06f
             val vLen = hypot(vJoyX, vJoyY)
+            // 加速度：指数逼近目标速度，tau=accelTime/3；松手按同时间常数衰减
+            val tau = (cfg.accelTime / 3f).coerceAtLeast(16f)
+            val alpha = 1f - kotlin.math.exp(-16f / tau)
             if (vLen > vDead && (mode == Mode.MOVE || mode == Mode.DRAG)) {
                 val norm = ((vLen - vDead) / (1f - vDead)).coerceIn(0f, 1f)
-                // smoothstep 曲线：起步柔和、推满线性，手感顺滑
-                val v = norm * norm * (3f - 2f * norm)
-                val speedPx = cfg.cursorSpeed * 3f * density * 16f // 每 tick 位移
-                val dx = (vJoyX / vLen) * v * speedPx
-                val dy = (vJoyY / vLen) * v * speedPx
+                val target = norm * norm * (3f - 2f * norm) // smoothstep：起步柔和、推满线性
+                vJoySpeed += (target - vJoySpeed) * alpha
+                // 速度标定：cursorSpeed(1..20) × 100 × density = 像素/秒（默认 6 → 1800px/s）
+                val maxPxPerSec = cfg.cursorSpeed * 100f * density
+                val speedPx = vJoySpeed * maxPxPerSec * 16f / 1000f
+                val dx = (vJoyX / vLen) * speedPx
+                val dy = (vJoyY / vLen) * speedPx
                 moveCursorBy(dx, dy)
                 lastActivity = now
+            } else {
+                vJoySpeed *= (1f - alpha) // 未推动时速度衰减（缓停）
             }
             // 虚拟摇杆拖拽模式：拖动链跟随光标（节流 40ms）
             if (mode == Mode.DRAG && dragging) {

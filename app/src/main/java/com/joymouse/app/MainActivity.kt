@@ -26,6 +26,7 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var tvAccess: TextView
     private lateinit var tvSpeedValue: TextView
+    private lateinit var tvAccelValue: TextView
     private lateinit var tvOpacityValue: TextView
     private lateinit var tvDeadzoneValue: TextView
     private lateinit var tvStyleValue: TextView
@@ -46,6 +47,7 @@ class MainActivity : AppCompatActivity() {
 
         tvAccess = findViewById(R.id.tvAccessStatus)
         tvSpeedValue = findViewById(R.id.tvSpeedValue)
+        tvAccelValue = findViewById(R.id.tvAccelValue)
         tvOpacityValue = findViewById(R.id.tvOpacityValue)
         tvDeadzoneValue = findViewById(R.id.tvDeadzoneValue)
         tvStyleValue = findViewById(R.id.tvStyleValue)
@@ -95,6 +97,21 @@ class MainActivity : AppCompatActivity() {
             override fun onStopTrackingTouch(sb: SeekBar?) {}
         })
         tvSpeedValue.text = "×${config.cursorSpeed.toInt()}"
+
+        // 摇杆加速时间（0..800ms）
+        val sbAccel = findViewById<SeekBar>(R.id.sbAccel)
+        sbAccel.max = 800
+        sbAccel.progress = config.accelTime.coerceIn(0, 800)
+        sbAccel.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
+                config.accelTime = p
+                tvAccelValue.text = if (p == 0) "0ms" else "${p}ms"
+                ConfigStore.save(this@MainActivity, config)
+            }
+            override fun onStartTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) {}
+        })
+        tvAccelValue.text = if (config.accelTime == 0) "0ms" else "${config.accelTime}ms"
 
         val sbOpacity = findViewById<SeekBar>(R.id.sbOpacity)
         sbOpacity.max = 90

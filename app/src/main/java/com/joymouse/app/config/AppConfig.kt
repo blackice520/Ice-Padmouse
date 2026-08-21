@@ -86,6 +86,7 @@ data class AppConfig(
     var deadzone: Int = 15,            // 摇杆死区 0..50 (%)
     var scrollSpeed: Int = 100,        // 右摇杆滚动速度 1..100
     var mouseTimeout: Int = 0,         // 鼠标空闲自动关闭（秒，0=关闭）
+    var accelTime: Int = 300,          // 摇杆加速时间 ms（0=无加速，越大起步越柔和）
     var cursorStyle: String = "orange",// 光标样式 orange/white/red/green/blue/black
     var swapAB: Boolean = false,       // 交换 A/B 键
     var hapticEnabled: Boolean = true, // 触觉反馈
@@ -123,6 +124,7 @@ data class AppConfig(
             .put("deadzone", deadzone)
             .put("scrollSpeed", scrollSpeed)
             .put("mouseTimeout", mouseTimeout)
+            .put("accelTime", accelTime)
             .put("cursorStyle", cursorStyle)
             .put("swapAB", swapAB)
             .put("hapticEnabled", hapticEnabled)
@@ -151,6 +153,7 @@ data class AppConfig(
                 cfg.deadzone = o.optInt("deadzone", 15).coerceIn(0, 50)
                 cfg.scrollSpeed = o.optInt("scrollSpeed", 100).coerceIn(1, 100)
                 cfg.mouseTimeout = o.optInt("mouseTimeout", 0)
+                cfg.accelTime = o.optInt("accelTime", 300).coerceIn(0, 2000)
                 cfg.cursorStyle = o.optString("cursorStyle", "orange")
                 cfg.swapAB = o.optBoolean("swapAB", false)
                 cfg.hapticEnabled = o.optBoolean("hapticEnabled", true)
