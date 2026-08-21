@@ -587,22 +587,43 @@ class OverlayController(private val service: GestureAccessibilityService) {
     // ================= 动作执行 =================
 
     /**
-     * 可靠注入：等 80ms（让真实触摸流收尾）再注入；
-     * 若被系统取消（例如手指还按在屏幕上），220ms 后自动重试，最多 5 次。
+     * 注入期间让我们的窗口临时"穿透"触摸（FLAG_NOT_TOUCHABLE）：
+     * 注入的点击精确落在光标处，即使光标压在我们自己的悬浮窗/按键上也不会被吞掉或触发悬浮键。
+     * 只在所有手指都离开我们窗口时启用（避免用户手指被穿透误触到应用）。
      */
+    private var passthroughActive = false
+
+    private fun setPassthrough(on: Boolean) {
+        if (passthroughActive == on) return
+        passthroughActive = on
+        fun apply(v: View?, p: WindowManager.LayoutParams?) {
+            if (v == null || p == null) return
+            p.flags = if (on) p.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+            else p.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+            runCatching { wm.updateViewLayout(v, p) }
+        }
+        apply(panel, panelParams)
+        apply(editBar, editBarParams)
+        buttonViews.values.forEach { apply(it, it.layoutParams as? WindowManager.LayoutParams) }
+        picker.setTouchable(!on)
+    }
+
     private fun injectWithRetry(dispatch: (onResult: (Boolean) -> Unit) -> Unit) {
         var attempts = 0
+        val passthrough = ourTouchCount == 0
         val task = object : Runnable {
             override fun run() {
                 if (attempts >= 5) return
                 attempts++
                 // 每次注入前刷新活动时间：注入手势本身也会触发触摸休眠检测，避免被误判为"用户触摸"而关闭鼠标
                 lastActivity = System.currentTimeMillis()
+                if (passthrough) setPassthrough(true)
                 dispatch { ok ->
                     if (!ok && attempts < 5) {
                         tickHandler.postDelayed(this, 220)
-                    } else if (!ok) {
-                        android.util.Log.w("JoyMouse", "注入手势失败(已重试5次)")
+                    } else {
+                        if (passthrough) tickHandler.postDelayed({ setPassthrough(false) }, 250)
+                        if (!ok) android.util.Log.w("JoyMouse", "注入手势失败(已重试5次)")
                     }
                 }
             }
@@ -634,10 +655,13 @@ class OverlayController(private val service: GestureAccessibilityService) {
     }
 
     fun execute(action: Action) {
+        // 拖拽链进行中：忽略悬浮键触发，避免注入手势又触发按键形成循环
+        if (chainActive) return
         val s = GestureAccessibilityService.instance ?: return
         lastActivity = System.currentTimeMillis()
-        // 光标若停在本应用悬浮窗上，自动挪到最近空白处（避免点击被自己吞掉/触发悬浮键）
-        val (tx, ty) = freeCursorTarget()
+        // 点击精确落在光标处（注入期间我们的窗口会临时穿透，无需挪动光标）
+        val tx = cursorX
+        val ty = cursorY
         when (action) {
             Action.CLICK -> doClick(tx, ty)
             Action.DOUBLE_CLICK -> {
@@ -761,42 +785,6 @@ class OverlayController(private val service: GestureAccessibilityService) {
         return rects
     }
 
-    /**
-     * 若 (x,y) 被本应用窗口覆盖，返回距离最近的未被覆盖点；
-     * 否则原样返回。保证注入的点击/拖拽始终落在应用窗口上，
-     * 避免点击被悬浮窗吞掉（或误触发悬浮键形成注入循环）。
-     */
-    private fun nearestFreePoint(x: Float, y: Float): Pair<Float, Float> {
-        fun free(px: Float, py: Float): Boolean =
-            ourWindowRects().none { px >= it.left && px <= it.right && py >= it.top && py <= it.bottom }
-        if (free(x, y)) return x to y
-        val step = dp(12).toFloat()
-        for (ring in 1..50) {
-            val r = ring * step
-            val candidates = listOf(
-                x to y - r, x to y + r, x - r to y, x + r to y,
-                x - r to y - r, x + r to y - r, x - r to y + r, x + r to y + r
-            )
-            for ((px, py) in candidates) {
-                val cx = px.coerceIn(0f, screenW.toFloat())
-                val cy = py.coerceIn(0f, screenH.toFloat())
-                if (free(cx, cy)) return cx to cy
-            }
-        }
-        return screenW / 2f to screenH / 2f
-    }
-
-    /** 取光标处可注入手势的目标点：若被本应用窗口覆盖则就近挪开并更新光标显示 */
-    private fun freeCursorTarget(): Pair<Float, Float> {
-        val (tx, ty) = nearestFreePoint(cursorX, cursorY)
-        if (tx != cursorX || ty != cursorY) {
-            cursorX = tx
-            cursorY = ty
-            updateCursor()
-        }
-        return tx to ty
-    }
-
     /** 手柄摇杆轴事件（来自 GamepadInputView） */
     fun onGamepadMotion(event: MotionEvent): Boolean {
         if (!mouseActive) return false
@@ -846,14 +834,13 @@ class OverlayController(private val service: GestureAccessibilityService) {
         return true
     }
 
-    /** 左键按下：不立即派发，等 tick 决定点击/拖拽。按下点取光标处可注入位置 */
+    /** 左键按下：不立即派发，等 tick 决定点击/拖拽。按下点取光标当前位置 */
     private fun leftButtonDown() {
         if (leftHeld) return
-        val (tx, ty) = freeCursorTarget()
         leftHeld = true
         leftDragging = false
-        pressX = tx
-        pressY = ty
+        pressX = cursorX
+        pressY = cursorY
         pressTime = System.currentTimeMillis()
         lastActivity = pressTime
     }
@@ -868,8 +855,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
             leftDragging = false
         } else {
             val s = GestureAccessibilityService.instance ?: return
-            val (tx, ty) = freeCursorTarget()
-            injectWithRetry { cb -> s.tap(tx, ty, onResult = cb) }
+            injectWithRetry { cb -> s.tap(cursorX, cursorY, onResult = cb) }
             haptic()
         }
     }
@@ -892,8 +878,10 @@ class OverlayController(private val service: GestureAccessibilityService) {
     private fun endChainDrag() {
         if (!chainActive) return
         chainActive = false
-        val (tx, ty) = freeCursorTarget()
-        GestureAccessibilityService.instance?.dragEnd(tx, ty)
+        // 终笔划抬指可能落在我们窗口上：短暂穿透，避免误触发悬浮键
+        setPassthrough(true)
+        GestureAccessibilityService.instance?.dragEnd(cursorX, cursorY)
+        tickHandler.postDelayed({ setPassthrough(false) }, 300)
     }
 
     /** 60fps 主循环：速度积分、拖拽状态机、右摇杆滚动、空闲超时 */

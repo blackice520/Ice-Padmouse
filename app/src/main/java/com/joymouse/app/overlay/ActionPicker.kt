@@ -34,25 +34,13 @@ class ActionPicker(private val controller: OverlayController) {
         }
         col.addView(header("编辑按键：${btn.label}（当前：${btn.action.label}）"))
 
-        // 取消：置顶、加大，同时挂点击+触摸双监听（触摸抬起即关闭，双保险）
-        col.addView(TextView(ctx).apply {
-            text = "取消（不修改）"
-            textSize = 15f
-            gravity = Gravity.CENTER
-            setTextColor(Color.rgb(110, 110, 110))
-            background = controller.roundedDrawable(Color.rgb(226, 226, 226), 8f)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, controller.dp(44)
-            ).apply { setMargins(controller.dp(3), controller.dp(2), controller.dp(3), controller.dp(2)) }
-            setOnClickListener { hide() }
-            setOnTouchListener { _, e ->
-                if (e.actionMasked == android.view.MotionEvent.ACTION_UP) {
-                    hide()
-                    true
-                } else {
-                    false
-                }
-            }
+        // 取消：置顶、加大，触摸抬起即关闭（双保险）
+        col.addView(touchRow("取消（不修改）", Color.rgb(110, 110, 110), Color.rgb(226, 226, 226), 44) { hide() })
+
+        // 删除：醒目的红色大按钮（用户要求的删除功能）
+        col.addView(touchRow("删除此按键", Color.WHITE, Color.rgb(211, 47, 47), 44) {
+            controller.onButtonDeleted(btn)
+            hide()
         })
 
         // 尺寸调节
@@ -62,7 +50,6 @@ class ActionPicker(private val controller: OverlayController) {
         }
         sizeRow.addView(row("尺寸－") { controller.onButtonResized(btn, -8) })
         sizeRow.addView(row("尺寸＋") { controller.onButtonResized(btn, 8) })
-        sizeRow.addView(row("删除") { controller.onButtonDeleted(btn); hide() })
         col.addView(sizeRow)
 
         // 动作列表（滚动）
@@ -128,6 +115,14 @@ class ActionPicker(private val controller: OverlayController) {
         return android.graphics.Rect(p.x, p.y, p.x + p.width, p.y + p.height)
     }
 
+    /** 注入穿透期间临时置为不可触摸，避免注入点击落在面板上 */
+    fun setTouchable(on: Boolean) {
+        val p = params ?: return
+        p.flags = if (on) p.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+        else p.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        window?.let { runCatching { wm.updateViewLayout(it, p) } }
+    }
+
     private fun header(text: String): TextView =
         TextView(ctx).apply {
             this.text = text
@@ -154,6 +149,36 @@ class ActionPicker(private val controller: OverlayController) {
             hide()
         }
 
+    /** 醒目操作行（取消/删除）：触摸抬起即触发，双保险 */
+    private fun touchRow(
+        label: String,
+        textColor: Int,
+        bgColor: Int,
+        heightDp: Int,
+        onClick: () -> Unit
+    ): TextView =
+        TextView(ctx).apply {
+            text = label
+            setTextColor(textColor)
+            textSize = 15f
+            gravity = Gravity.CENTER
+            background = controller.roundedDrawable(bgColor, 8f)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, controller.dp(heightDp)
+            ).apply { setMargins(controller.dp(3), controller.dp(2), controller.dp(3), controller.dp(2)) }
+            setOnTouchListener { _, e ->
+                when (e.actionMasked) {
+                    android.view.MotionEvent.ACTION_DOWN -> controller.onOurTouch(true)
+                    android.view.MotionEvent.ACTION_UP -> {
+                        controller.onOurTouch(false)
+                        onClick()
+                    }
+                    android.view.MotionEvent.ACTION_CANCEL -> controller.onOurTouch(false)
+                }
+                true
+            }
+        }
+
     private fun row(label: String, onClick: () -> Unit): TextView =
         TextView(ctx).apply {
             text = label
@@ -166,6 +191,17 @@ class ActionPicker(private val controller: OverlayController) {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 controller.dp(38)
             ).apply { setMargins(controller.dp(3), controller.dp(2), controller.dp(3), controller.dp(2)) }
-            setOnClickListener { onClick() }
+            // 触摸抬起触发（比 click 更可靠，且上报触摸状态给控制器）
+            setOnTouchListener { _, e ->
+                when (e.actionMasked) {
+                    android.view.MotionEvent.ACTION_DOWN -> controller.onOurTouch(true)
+                    android.view.MotionEvent.ACTION_UP -> {
+                        controller.onOurTouch(false)
+                        onClick()
+                    }
+                    android.view.MotionEvent.ACTION_CANCEL -> controller.onOurTouch(false)
+                }
+                true
+            }
         }
 }
