@@ -75,6 +75,7 @@ class MappedButtonView(context: Context, val btn: MappedButton, private val cont
                 moved = false
                 downTime = SystemClock.uptimeMillis()
                 parent?.requestDisallowInterceptTouchEvent(true)
+                controller.onOurTouch(true)
             }
             MotionEvent.ACTION_MOVE -> {
                 val idx = e.findPointerIndex(pointerId)
@@ -88,6 +89,7 @@ class MappedButtonView(context: Context, val btn: MappedButton, private val cont
             MotionEvent.ACTION_UP -> {
                 if (pointerId != -1) {
                     pointerId = -1
+                    controller.onOurTouch(false)
                     val longPress = !moved && SystemClock.uptimeMillis() - downTime > 550
                     if (editing) {
                         if (!moved) controller.onEditButtonTapped(this)
@@ -99,7 +101,12 @@ class MappedButtonView(context: Context, val btn: MappedButton, private val cont
                     }
                 }
             }
-            MotionEvent.ACTION_CANCEL -> pointerId = -1
+            MotionEvent.ACTION_CANCEL -> {
+                if (pointerId != -1) {
+                    pointerId = -1
+                    controller.onOurTouch(false)
+                }
+            }
         }
         return true
     }

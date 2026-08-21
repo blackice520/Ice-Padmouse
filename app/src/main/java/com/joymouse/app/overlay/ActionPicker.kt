@@ -42,8 +42,18 @@ class ActionPicker(private val controller: OverlayController) {
         }
         col.addView(header("编辑按键：${btn.label}（当前：${btn.action.label}）"))
 
-        // 取消：放在顶部，避免屏幕底部手势条遮挡导致点不到
-        col.addView(row("取消") { hide() })
+        // 取消：放在顶部且加大，避免屏幕底部手势条遮挡导致点不到
+        col.addView(TextView(ctx).apply {
+            text = "取消（不修改）"
+            textSize = 15f
+            gravity = Gravity.CENTER
+            setTextColor(Color.rgb(110, 110, 110))
+            background = controller.roundedDrawable(Color.rgb(226, 226, 226), 8f)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, controller.dp(44)
+            ).apply { setMargins(controller.dp(3), controller.dp(2), controller.dp(3), controller.dp(2)) }
+            setOnClickListener { hide() }
+        })
 
         // 尺寸调节
         val sizeRow = LinearLayout(ctx).apply {

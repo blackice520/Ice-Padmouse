@@ -120,6 +120,19 @@ class OverlayController(private val service: GestureAccessibilityService) {
     private var pendingClickY = 0f
     private var pendingClickActive = false
 
+    /** 按在我们任一交互窗口上的手指数（控制台/编辑栏/自定义按键/摇杆） */
+    private var ourTouchCount = 0
+
+    /** 我们自己的窗口被触摸/抬起时回调（由各视图上报） */
+    fun onOurTouch(down: Boolean) {
+        if (down) {
+            ourTouchCount++
+        } else {
+            ourTouchCount = (ourTouchCount - 1).coerceAtLeast(0)
+            if (ourTouchCount == 0) flushPendingClick()
+        }
+    }
+
     private val tickHandler = Handler(Looper.getMainLooper())
     private val tickRunnable = object : Runnable {
         override fun run() {
@@ -358,12 +371,13 @@ class OverlayController(private val service: GestureAccessibilityService) {
         stick.onTap = { if (mode == Mode.MOVE) execute(Action.CLICK) }
         stick.onPress = {
             joystickTouched = true
+            onOurTouch(true)
             if (mode == Mode.DRAG) startDrag()
         }
         stick.onRelease = {
             joystickTouched = false
+            onOurTouch(false)
             if (mode == Mode.DRAG) endDrag()
-            flushPendingClick()
         }
         joystick = stick
         p.addView(stick)
@@ -420,7 +434,18 @@ class OverlayController(private val service: GestureAccessibilityService) {
             setTextColor(Color.WHITE)
             background = roundedDrawable(Color.argb(80, 255, 255, 255), 10f)
             layoutParams = LinearLayout.LayoutParams(0, dp(34), 1f)
-            setOnClickListener { onClick(); haptic() }
+            setOnTouchListener { _, e ->
+                when (e.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> onOurTouch(true)
+                    MotionEvent.ACTION_UP -> {
+                        onOurTouch(false)
+                        onClick()
+                        haptic()
+                    }
+                    MotionEvent.ACTION_CANCEL -> onOurTouch(false)
+                }
+                true
+            }
         }
 
     private fun modeKey(label: String, m: Mode): TextView =
@@ -431,13 +456,21 @@ class OverlayController(private val service: GestureAccessibilityService) {
             setTextColor(Color.WHITE)
             background = roundedDrawable(Color.argb(80, 255, 255, 255), 10f)
             layoutParams = LinearLayout.LayoutParams(0, dp(34), 1f)
-            setOnClickListener {
-                mode = if (mode == m) Mode.MOVE else m
-                if (mode == Mode.DRAG) config.dragMode = true
-                if (mode != Mode.DRAG) config.dragMode = false
-                saveConfig()
-                refreshModeButtons()
-                haptic()
+            setOnTouchListener { _, e ->
+                when (e.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> onOurTouch(true)
+                    MotionEvent.ACTION_UP -> {
+                        onOurTouch(false)
+                        mode = if (mode == m) Mode.MOVE else m
+                        if (mode == Mode.DRAG) config.dragMode = true
+                        if (mode != Mode.DRAG) config.dragMode = false
+                        saveConfig()
+                        refreshModeButtons()
+                        haptic()
+                    }
+                    MotionEvent.ACTION_CANCEL -> onOurTouch(false)
+                }
+                true
             }
         }
 
@@ -544,35 +577,37 @@ class OverlayController(private val service: GestureAccessibilityService) {
     // ================= 动作执行 =================
 
     /**
-     * 可靠注入：等 60ms（让真实触摸流收尾）再注入；
-     * 若被系统取消（例如另一根手指还按在屏幕上），180ms 后自动重试，最多 3 次。
+     * 可靠注入：等 80ms（让真实触摸流收尾）再注入；
+     * 若被系统取消（例如手指还按在屏幕上），220ms 后自动重试，最多 5 次。
      */
     private fun injectWithRetry(dispatch: (onResult: (Boolean) -> Unit) -> Unit) {
         var attempts = 0
         val task = object : Runnable {
             override fun run() {
-                if (attempts >= 3) return
+                if (attempts >= 5) return
                 attempts++
                 dispatch { ok ->
-                    if (!ok && attempts < 3) {
-                        tickHandler.postDelayed(this, 180)
+                    if (!ok && attempts < 5) {
+                        tickHandler.postDelayed(this, 220)
                     }
                 }
             }
         }
-        tickHandler.postDelayed(task, 60)
+        tickHandler.postDelayed(task, 80)
     }
 
-    /** 摇杆上的手指抬起后补发被挂起的点击 */
+    /** 所有手指离开我们的窗口后，补发被挂起的点击 */
     private fun flushPendingClick() {
         if (!pendingClickActive) return
         pendingClickActive = false
-        injectWithRetry { cb -> GestureAccessibilityService.instance?.tap(pendingClickX, pendingClickY, onResult = cb) }
+        tickHandler.postDelayed({
+            injectWithRetry { cb -> GestureAccessibilityService.instance?.tap(pendingClickX, pendingClickY, onResult = cb) }
+        }, 80)
     }
 
-    /** 左键单击：若另一根手指按在摇杆上，挂起等摇杆抬起再注入（避免被真实触摸打断） */
+    /** 左键单击：若还有手指按在我们的窗口上，挂起等全部抬起再注入（避免被真实触摸打断） */
     private fun doClick(tx: Float, ty: Float) {
-        if (joystickTouched) {
+        if (ourTouchCount > 0) {
             pendingClickX = tx
             pendingClickY = ty
             pendingClickActive = true
@@ -852,10 +887,12 @@ class OverlayController(private val service: GestureAccessibilityService) {
         val s = GestureAccessibilityService.instance ?: return
         val now = System.currentTimeMillis()
 
-        // 摇杆松开兜底：250ms 无轴事件则速度归零（部分手柄松开时不发归零事件）
+        // 摇杆松开兜底：250ms 无轴事件则速度/滚动方向归零（部分手柄松开时不发归零事件）
         if (now - lastMotionTime > 250) {
             stickX = 0f
             stickY = 0f
+            scrollX = 0f
+            scrollY = 0f
         }
 
         // 1) 左摇杆 → 光标速度（死区 + 幂次曲线）
@@ -1012,7 +1049,10 @@ class OverlayController(private val service: GestureAccessibilityService) {
         editMode = on
         joystick?.active = !on
         buttonViews.values.forEach { it.setEditMode(on) }
-        if (on) showEditBar() else hideEditBar()
+        if (on) showEditBar() else {
+            hideEditBar()
+            picker.hide() // 退出编辑时同时关闭可能打开的选择面板
+        }
         refreshModeButtons()
     }
 
@@ -1052,7 +1092,18 @@ class OverlayController(private val service: GestureAccessibilityService) {
             layoutParams = LinearLayout.LayoutParams(dp(88), dp(34)).apply {
                 setMargins(dp(3), 0, dp(3), 0)
             }
-            setOnClickListener { onClick(); haptic() }
+            setOnTouchListener { _, e ->
+                when (e.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> onOurTouch(true)
+                    MotionEvent.ACTION_UP -> {
+                        onOurTouch(false)
+                        onClick()
+                        haptic()
+                    }
+                    MotionEvent.ACTION_CANCEL -> onOurTouch(false)
+                }
+                true
+            }
         }
 
     // ================= 工具 =================
