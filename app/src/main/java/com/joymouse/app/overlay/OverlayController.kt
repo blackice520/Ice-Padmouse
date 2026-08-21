@@ -105,6 +105,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
     private var pressTime = 0L
     private var lastScrollTime = 0L
     private var lastActivity = 0L
+    private var lastDragMoveTime = 0L
+    private var lastMotionTime = 0L
     /** 连续拖拽链（复用服务的链式拖拽） */
     private var chainActive = false
 
@@ -530,8 +532,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
             gamepadParams = baseParams(1, 1).apply {
                 flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
-                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
+                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
                 x = 0
                 y = 0
             }
@@ -587,7 +588,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
         if (kotlin.math.abs(ry) <= kotlin.math.abs(rz)) ry = rz
         scrollX = rx
         scrollY = ry
-        lastActivity = System.currentTimeMillis()
+        lastMotionTime = System.currentTimeMillis()
+        lastActivity = lastMotionTime
         return true
     }
 
@@ -669,6 +671,13 @@ class OverlayController(private val service: GestureAccessibilityService) {
         if (!mouseActive) return
         val cfg = config
         val s = GestureAccessibilityService.instance ?: return
+        val now = System.currentTimeMillis()
+
+        // 摇杆松开兜底：250ms 无轴事件则速度归零（部分手柄松开时不发归零事件）
+        if (now - lastMotionTime > 250) {
+            stickX = 0f
+            stickY = 0f
+        }
 
         // 1) 左摇杆 → 光标速度（死区 + 幂次曲线）
         val dead = cfg.deadzone / 100f
@@ -681,13 +690,13 @@ class OverlayController(private val service: GestureAccessibilityService) {
             val dx = (stickX / len) * v * speedPx
             val dy = (stickY / len) * v * speedPx
             moveCursorBy(dx, dy)
-            lastActivity = System.currentTimeMillis()
+            lastActivity = now
         }
 
         // 2) 左键状态机：移动超阈值或静止超 500ms 转拖拽
         if (leftHeld && !leftDragging) {
             val moved = hypot(cursorX - pressX, cursorY - pressY) > 6f * density
-            val heldLong = System.currentTimeMillis() - pressTime > 500
+            val heldLong = now - pressTime > 500
             if (moved || heldLong) {
                 leftDragging = true
                 startChainDrag()
@@ -695,7 +704,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
         }
         if (leftDragging) {
             val g = GestureAccessibilityService.instance
-            if (g != null) {
+            if (g != null && now - lastDragMoveTime > 40) { // 节流，与参考应用一致
+                lastDragMoveTime = now
                 g.dragMove(cursorX, cursorY)
             }
         }
@@ -703,7 +713,6 @@ class OverlayController(private val service: GestureAccessibilityService) {
         // 3) 右摇杆 → 滚动（每 200ms 一次）
         val scrollLen = hypot(scrollX, scrollY)
         if (scrollLen > dead && !leftHeld) {
-            val now = System.currentTimeMillis()
             if (now - lastScrollTime > 200) {
                 lastScrollTime = now
                 val step = (cfg.scrollStep * cfg.scrollSpeed / 100f).toInt().coerceAtLeast(80)
@@ -713,7 +722,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
         }
 
         // 4) 空闲超时自动关闭鼠标
-        if (cfg.mouseTimeout > 0 && System.currentTimeMillis() - lastActivity > cfg.mouseTimeout * 1000L) {
+        if (cfg.mouseTimeout > 0 && now - lastActivity > cfg.mouseTimeout * 1000L) {
             toggleMouse()
         }
     }
