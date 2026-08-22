@@ -755,7 +755,9 @@ class OverlayController(private val service: GestureAccessibilityService) {
         val passthrough = ourTouchCount == 0
         val task = object : Runnable {
             override fun run() {
-                if (attempts >= 5) return
+                // 最多重试 1 次（共 2 次派发）：多次重试在"并发手势互相取消"场景下
+                // 会形成重试风暴（两条链互相取消→各自重试→再取消…），已在游戏模式实锤。
+                if (attempts >= 2) return
                 attempts++
                 // 每次注入前刷新活动时间：注入手势本身也会触发触摸休眠检测，避免被误判为"用户触摸"而关闭鼠标
                 lastActivity = System.currentTimeMillis()
@@ -763,11 +765,11 @@ class OverlayController(private val service: GestureAccessibilityService) {
                 if (passthrough) setPassthrough(true)
                 dispatch { ok ->
                     logEvent("inject", "done ok=$ok")
-                    if (!ok && attempts < 5) {
+                    if (!ok && attempts < 2) {
                         tickHandler.postDelayed(this, 220)
                     } else {
                         if (passthrough) tickHandler.postDelayed({ setPassthrough(false) }, 250)
-                        if (!ok) android.util.Log.w("JoyMouse", "注入手势失败(已重试5次)")
+                        if (!ok) android.util.Log.w("JoyMouse", "注入手势失败(已重试1次)")
                     }
                 }
             }
@@ -1150,12 +1152,12 @@ class OverlayController(private val service: GestureAccessibilityService) {
         lastActivity = System.currentTimeMillis()
         logEvent("gameKey", "$keyName -> $binding")
         when (prefix) {
-            "tap" -> { injectWithRetry { cb -> s.tap(px, py, onResult = cb) }; return true }
-            "longpress" -> { injectWithRetry { cb -> s.longPress(px, py, onResult = cb) }; return true }
-            "swipe_up" -> { injectWithRetry { cb -> s.swipe(px, py, px, py - dist, 260, cb) }; scheduleGameRepeat(binding, keyName); return true }
-            "swipe_down" -> { injectWithRetry { cb -> s.swipe(px, py, px, py + dist, 260, cb) }; scheduleGameRepeat(binding, keyName); return true }
-            "swipe_left" -> { injectWithRetry { cb -> s.swipe(px, py, px - dist, py, 260, cb) }; scheduleGameRepeat(binding, keyName); return true }
-            "swipe_right" -> { injectWithRetry { cb -> s.swipe(px, py, px + dist, py, 260, cb) }; scheduleGameRepeat(binding, keyName); return true }
+            "tap" -> { injectGameOnce { cb -> s.tap(px, py, onResult = cb) }; return true }
+            "longpress" -> { injectGameOnce { cb -> s.longPress(px, py, onResult = cb) }; return true }
+            "swipe_up" -> { injectGameSwipe { s.swipe(px, py, px, py - dist, 260, it) }; scheduleGameRepeat(binding, keyName); return true }
+            "swipe_down" -> { injectGameSwipe { s.swipe(px, py, px, py + dist, 260, it) }; scheduleGameRepeat(binding, keyName); return true }
+            "swipe_left" -> { injectGameSwipe { s.swipe(px, py, px - dist, py, 260, it) }; scheduleGameRepeat(binding, keyName); return true }
+            "swipe_right" -> { injectGameSwipe { s.swipe(px, py, px + dist, py, 260, it) }; scheduleGameRepeat(binding, keyName); return true }
             else -> {
                 when (binding) {
                     "home" -> performGlobalThrottled(Action.HOME)
@@ -1174,6 +1176,42 @@ class OverlayController(private val service: GestureAccessibilityService) {
                 return true
             }
         }
+    }
+
+    // ---- 游戏模式注入：单次派发、滑动单飞 ----
+    // 教训（events.log 实锤）：旧实现复用 injectWithRetry 的重试逻辑，快速连按时
+    // 两个滑动手势互相取消，每次取消又触发 220ms 后的重试，两条重试链来回"点按"
+    // 屏幕 1 秒以上。游戏模式注入因此：a) 绝不重试；b) 滑动在飞时跳过新滑动
+    // （按住连发由 gameRepeat 定时器在 300ms 周期自然重试）。
+
+    /** 游戏模式单击/长按注入：单次派发，不重试。onDone 在回调结束后触发。 */
+    private fun injectGameOnce(
+        onDone: ((Boolean) -> Unit)? = null,
+        dispatch: (onResult: (Boolean) -> Unit) -> Unit
+    ) {
+        lastActivity = System.currentTimeMillis()
+        val passthrough = ourTouchCount == 0
+        logEvent("gameInject", "start")
+        tickHandler.postDelayed({
+            if (passthrough) setPassthrough(true)
+            dispatch { ok ->
+                logEvent("gameInject", "done ok=$ok")
+                if (passthrough) tickHandler.postDelayed({ setPassthrough(false) }, 250)
+                onDone?.invoke(ok)
+            }
+        }, 40)
+    }
+
+    private var gameSwipeInFlight = false
+
+    /** 游戏模式滑动注入：单飞（已有滑动在飞时跳过，避免并发手势互相取消） */
+    private fun injectGameSwipe(dispatch: (onResult: (Boolean) -> Unit) -> Unit) {
+        if (gameSwipeInFlight) {
+            logEvent("gameInject", "swipe skip busy")
+            return
+        }
+        gameSwipeInFlight = true
+        injectGameOnce({ gameSwipeInFlight = false }) { cb -> dispatch(cb) }
     }
 
     /** 滑动绑定按住连发：按住期间每 300ms 重复一次滑动（松开停止） */
