@@ -1109,18 +1109,17 @@ class OverlayController(private val service: GestureAccessibilityService) {
 
     // ================= 游戏模式（不使用焦点窗） =================
 
-    /** 游戏模式开关。开启后：立即让出焦点、隐藏光标，之后所有按键走点位直连映射。
+    /** 游戏模式开关（状态唯一入口：由本方法统一变更并落盘）。
+     *  开启后：立即让出焦点、隐藏光标，之后所有按键走点位直连映射。
      *  关闭时：同步取消"显示点位标记"，标记立即隐藏。 */
     fun setGameMode(on: Boolean) {
         val cfg = config
-        if (cfg.gameMode == on) return
-        cfg.gameMode = on
-        if (!on && cfg.gamePointsVisible) {
-            // 关闭游戏模式：点位标记显示同步取消
-            cfg.gamePointsVisible = false
-            logEvent("gameMode", "points visibility auto-off")
+        if (cfg.gameMode == on) {
+            // 值未变：确保标记显隐与当前状态一致（幂等）
+            refreshGamePoints()
+            return
         }
-        saveConfig()
+        cfg.gameMode = on
         logEvent("gameMode", if (on) "ON" else "OFF")
         if (on) {
             focusHeld = false
@@ -1128,7 +1127,12 @@ class OverlayController(private val service: GestureAccessibilityService) {
             hideCursor()
             setGamePointEditing(false)
             setEditing(false)
+        } else if (cfg.gamePointsVisible) {
+            // 关闭游戏模式：点位标记显示同步取消
+            cfg.gamePointsVisible = false
+            logEvent("gameMode", "points visibility auto-off")
         }
+        saveConfig()
         refreshModeButtons()
         refreshGamePoints() // 关闭时立即隐藏标记
     }

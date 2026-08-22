@@ -391,13 +391,17 @@ class MainActivity : AppCompatActivity() {
             setOnClickListener { onClick() }
         }
 
-        // 开关：游戏模式
+        // 开关：游戏模式（状态由控制器统一管理并落盘，这里只转发）
         val sw = SwitchCompat(this)
         sw.isChecked = cfg.gameMode
         sw.setOnCheckedChangeListener { _, on ->
-            cfg.gameMode = on
-            ConfigStore.save(this, cfg)
-            OverlayController.instance?.setGameMode(on)
+            val c = OverlayController.instance
+            if (c != null) {
+                c.setGameMode(on)
+            } else {
+                cfg.gameMode = on
+                ConfigStore.save(this, cfg)
+            }
             buildGameUi()
         }
         container.addView(row(sw, "游戏模式（不使用焦点窗）"))
