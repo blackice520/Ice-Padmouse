@@ -435,7 +435,11 @@ class MainActivity : AppCompatActivity() {
                 if (c != null) {
                     val on = !c.gamePointEditing()
                     c.setGamePointEditing(on)
-                    if (!on) Toast.makeText(this, "点位已保存", Toast.LENGTH_SHORT).show()
+                    if (on) {
+                        Toast.makeText(this, "拖动屏幕上的橙色标记到游戏按键位置", Toast.LENGTH_LONG).show()
+                    } else {
+                        Toast.makeText(this, "点位已保存", Toast.LENGTH_SHORT).show()
+                    }
                     buildGameUi()
                 } else {
                     Toast.makeText(this, "请先开启无障碍服务", Toast.LENGTH_SHORT).show()
@@ -447,7 +451,16 @@ class MainActivity : AppCompatActivity() {
             btn("添加点位") {
                 val c = OverlayController.instance
                 if (c != null) {
-                    c.addGamePoint()
+                    val p = c.addGamePoint()
+                    if (p != null) {
+                        // 添加后立即进入点位编辑：标记马上出现在屏幕上，拖到游戏按键处
+                        c.setGamePointEditing(true)
+                        Toast.makeText(
+                            this,
+                            "已添加 ${p.label}：把屏幕上的橙色标记拖到游戏按键上，完成后回本页点[完成点位编辑]",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
                     buildGameUi()
                 } else {
                     Toast.makeText(this, "请先开启无障碍服务", Toast.LENGTH_SHORT).show()
