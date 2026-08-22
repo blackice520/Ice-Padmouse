@@ -104,6 +104,22 @@
         </LinearLayout>
     </ScrollView>
 
+    <!-- ============ 页3：游戏（不使用焦点窗） ============ -->
+    <ScrollView
+        android:id="@+id/pageGame"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:id="@+id/llGameContent"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp" />
+    </ScrollView>
+
     <!-- ============ 页3：设置 ============ -->
     <ScrollView
         android:id="@+id/pageSettings"

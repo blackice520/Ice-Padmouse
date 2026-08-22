@@ -63,10 +63,12 @@ class MainActivity : AppCompatActivity() {
         // 底部导航切换分区
         val pageVirtual = findViewById<View>(R.id.pageVirtual)
         val pageMapping = findViewById<ScrollView>(R.id.pageMapping)
+        val pageGame = findViewById<ScrollView>(R.id.pageGame)
         val pageSettings = findViewById<ScrollView>(R.id.pageSettings)
         findViewById<BottomNavigationView>(R.id.bottomNav).setOnNavigationItemSelectedListener { item ->
             pageVirtual.visibility = if (item.itemId == R.id.nav_virtual) View.VISIBLE else View.GONE
             pageMapping.visibility = if (item.itemId == R.id.nav_mapping) View.VISIBLE else View.GONE
+            pageGame.visibility = if (item.itemId == R.id.nav_game) View.VISIBLE else View.GONE
             pageSettings.visibility = if (item.itemId == R.id.nav_settings) View.VISIBLE else View.GONE
             true
         }
@@ -194,12 +196,14 @@ class MainActivity : AppCompatActivity() {
         }
 
         buildGamepadMapUi()
+        buildGameUi()
     }
 
     override fun onResume() {
         super.onResume()
         refreshStatus()
         diagram.refresh()
+        buildGameUi()
     }
 
     private fun refreshStatus() {
@@ -345,6 +349,221 @@ class MainActivity : AppCompatActivity() {
                     showMappingPickerFor(key)
                 }
             }
+    }
+
+    // ================= 游戏模式（不使用焦点窗）页面 =================
+
+    private val gameKeyOrder = listOf(
+        "a", "b", "x", "y", "lb", "rb", "lt", "rt",
+        "up", "down", "left", "right", "start", "select", "mode", "center", "l3", "r3"
+    )
+
+    private fun buildGameUi() {
+        val container = findViewById<LinearLayout>(R.id.llGameContent)
+        container.removeAllViews()
+        val cfg = ConfigStore.load(this)
+
+        fun text(s: String, size: Float = 13f, color: Int = 0xFF555555.toInt(), bold: Boolean = false) =
+            TextView(this).apply {
+                text = s
+                textSize = size
+                setTextColor(color)
+                if (bold) paint.isFakeBoldText = true
+                setPadding(0, dp(4), 0, dp(4))
+            }
+
+        fun row(right: View, label: String) = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            setPadding(0, dp(6), 0, dp(6))
+            addView(TextView(this@MainActivity).apply {
+                text = label
+                textSize = 14f
+                setTextColor(0xFF333333.toInt())
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            })
+            addView(right)
+        }
+
+        fun btn(label: String, onClick: () -> Unit) = Button(this).apply {
+            text = label
+            textSize = 12f
+            setOnClickListener { onClick() }
+        }
+
+        // 开关：游戏模式
+        val sw = SwitchCompat(this)
+        sw.isChecked = cfg.gameMode
+        sw.setOnCheckedChangeListener { _, on ->
+            cfg.gameMode = on
+            ConfigStore.save(this, cfg)
+            OverlayController.instance?.setGameMode(on)
+            buildGameUi()
+        }
+        container.addView(row(sw, "游戏模式（不使用焦点窗）"))
+        container.addView(text("开启后游戏全程保持窗口焦点：物理摇杆不可用；手柄按键直接点击/滑动屏幕点位。", 12f))
+
+        // 滑动距离
+        container.addView(text("滑动距离（上/下/左/右滑）", 13f, 0xFF333333.toInt(), true))
+        val sbDist = SeekBar(this)
+        sbDist.max = 320 // 80..400 dp
+        sbDist.progress = cfg.gameSwipeDistance - 80
+        val tvDist = TextView(this).apply { text = "${cfg.gameSwipeDistance}dp"; textSize = 13f }
+        val distRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        sbDist.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        distRow.addView(sbDist)
+        distRow.addView(tvDist)
+        sbDist.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
+                cfg.gameSwipeDistance = p + 80
+                tvDist.text = "${cfg.gameSwipeDistance}dp"
+                ConfigStore.save(this@MainActivity, cfg)
+            }
+            override fun onStartTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) {}
+        })
+        container.addView(distRow)
+
+        // 点位管理
+        container.addView(text("屏幕点位（按键点击/滑动的目标位置）", 13f, 0xFF333333.toInt(), true))
+        container.addView(row(
+            btn(if (OverlayController.instance?.gamePointEditing() == true) "完成点位编辑" else "编辑点位位置") {
+                val c = OverlayController.instance
+                if (c != null) {
+                    val on = !c.gamePointEditing()
+                    c.setGamePointEditing(on)
+                    if (!on) Toast.makeText(this, "点位已保存", Toast.LENGTH_SHORT).show()
+                    buildGameUi()
+                } else {
+                    Toast.makeText(this, "请先开启无障碍服务", Toast.LENGTH_SHORT).show()
+                }
+            },
+            "把标记拖到游戏按键上"
+        ))
+        container.addView(row(
+            btn("添加点位") {
+                val c = OverlayController.instance
+                if (c != null) {
+                    c.addGamePoint()
+                    buildGameUi()
+                } else {
+                    Toast.makeText(this, "请先开启无障碍服务", Toast.LENGTH_SHORT).show()
+                }
+            },
+            "最多 10 个"
+        ))
+        cfg.gamePoints.forEach { p ->
+            container.addView(row(
+                btn("删除") {
+                    OverlayController.instance?.deleteGamePoint(p.id)
+                    buildGameUi()
+                },
+                "${p.label}  (${(p.x * 100).toInt()}%, ${(p.y * 100).toInt()}%)"
+            ))
+        }
+        if (cfg.gamePoints.isEmpty()) {
+            container.addView(text("还没有点位：先点[添加点位]，再点[编辑点位位置]，把屏幕上的标记拖到游戏按键上。", 12f))
+        }
+
+        // 按键绑定
+        container.addView(text("手柄按键绑定", 13f, 0xFF333333.toInt(), true))
+        gameKeyOrder.forEach { key ->
+            val label = gameBindingLabel(cfg, cfg.gameKeyMap[key])
+            val rowView = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                isClickable = true
+                isFocusable = true
+                setPadding(0, dp(8), 0, dp(8))
+                addView(TextView(this@MainActivity).apply {
+                    text = keyLabels[key] ?: key
+                    textSize = 14f
+                    setTextColor(0xFF333333.toInt())
+                    layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                })
+                addView(TextView(this@MainActivity).apply {
+                    text = label
+                    textSize = 13f
+                    setTextColor(getColor(R.color.primary))
+                })
+                setOnClickListener { showGameBindingPicker(cfg, key) }
+            }
+            container.addView(rowView)
+        }
+    }
+
+    /** 游戏模式绑定串 → 显示文字 */
+    private fun gameBindingLabel(cfg: com.joymouse.app.config.AppConfig, binding: String?): String {
+        if (binding.isNullOrBlank() || binding == "none") return "无动作"
+        val prefix = binding.substringBefore(':')
+        val actionName = when (prefix) {
+            "tap" -> "点击"
+            "longpress" -> "长按"
+            "swipe_up" -> "上滑"
+            "swipe_down" -> "下滑"
+            "swipe_left" -> "左滑"
+            "swipe_right" -> "右滑"
+            else -> null
+        }
+        if (actionName != null && binding.contains(':')) {
+            val p = cfg.gamePoints.firstOrNull { it.id == binding.substringAfter(':').toLongOrNull() }
+            return "$actionName ${p?.label ?: "?"}"
+        }
+        return when (binding) {
+            "home" -> "主页"
+            "back" -> "返回"
+            "recents" -> "最近任务"
+            "notifications" -> "通知栏"
+            "quick_settings" -> "快捷设置"
+            "screenshot" -> "截屏"
+            "vol_up" -> "音量+"
+            "vol_down" -> "音量-"
+            "mute" -> "静音"
+            "media_play_pause" -> "播放/暂停"
+            "toggle_panel" -> "显示控制台"
+            else -> binding
+        }
+    }
+
+    /** 游戏模式按键绑定选择弹窗 */
+    private fun showGameBindingPicker(cfg: com.joymouse.app.config.AppConfig, key: String) {
+        val options = mutableListOf<Pair<String, String>>()
+        options.add("none" to "无动作")
+        cfg.gamePoints.forEach { p ->
+            options.add("tap:${p.id}" to "点击 ${p.label}")
+            options.add("longpress:${p.id}" to "长按 ${p.label}")
+            options.add("swipe_up:${p.id}" to "上滑 ${p.label}")
+            options.add("swipe_down:${p.id}" to "下滑 ${p.label}")
+            options.add("swipe_left:${p.id}" to "左滑 ${p.label}")
+            options.add("swipe_right:${p.id}" to "右滑 ${p.label}")
+        }
+        options.add("home" to "主页")
+        options.add("back" to "返回")
+        options.add("recents" to "最近任务")
+        options.add("notifications" to "通知栏")
+        options.add("quick_settings" to "快捷设置")
+        options.add("screenshot" to "截屏")
+        options.add("vol_up" to "音量+")
+        options.add("vol_down" to "音量-")
+        options.add("mute" to "静音")
+        options.add("media_play_pause" to "播放/暂停")
+        options.add("toggle_panel" to "显示控制台")
+
+        val labels = options.map { it.second }.toTypedArray()
+        val idx = options.indexOfFirst { it.first == cfg.gameKeyMap[key] }.coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle("${keyLabels[key] ?: key} 的游戏模式动作")
+            .setSingleChoiceItems(labels, idx) { d, which ->
+                cfg.gameKeyMap[key] = options[which].first
+                ConfigStore.save(this, cfg)
+                d.dismiss()
+                buildGameUi()
+            }
+            .setNegativeButton("取消", null)
+            .show()
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()

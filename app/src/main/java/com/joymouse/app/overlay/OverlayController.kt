@@ -24,6 +24,7 @@ import com.joymouse.app.R
 import com.joymouse.app.config.Action
 import com.joymouse.app.config.AppConfig
 import com.joymouse.app.config.ConfigStore
+import com.joymouse.app.config.GamePoint
 import com.joymouse.app.config.MappedButton
 import com.joymouse.app.service.GestureAccessibilityService
 import kotlin.math.hypot
@@ -87,6 +88,10 @@ class OverlayController(private val service: GestureAccessibilityService) {
     private var mouseKeyView: TextView? = null
     internal val picker = ActionPicker(this)
 
+    /** 游戏模式点位标记窗口（编辑位置时显示） */
+    internal val gamePointViews = LinkedHashMap<Long, GamePointView>()
+    private var gamePointEditing = false
+
     /** 手柄输入焦点捕获窗（1×1 可聚焦无障碍窗口，位于 (0,0)） */
     private var gamepadView: GamepadInputView? = null
     private var gamepadParams: WindowManager.LayoutParams? = null
@@ -120,6 +125,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
 
     /** 手柄输入活跃：续期焦点保持；若当前未持有焦点则申请（按键路径在无焦点时也可靠） */
     private fun renewFocusHold() {
+        if (config.gameMode) return // 游戏模式：永远不申请焦点
         lastGamepadInput = System.currentTimeMillis()
         if (!focusHeld && mouseActive) {
             focusHeld = true
@@ -244,6 +250,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
         idleHandler.removeCallbacks(idleRunnable)
         tickHandler.removeCallbacks(tickRunnable)
         heartbeatHandler.removeCallbacks(heartbeatRunnable)
+        tickHandler.removeCallbacks(gameRepeatRunnable)
+        gameRepeatKey = null
         focusHeld = false
         try {
             hideCursor()
@@ -253,6 +261,9 @@ class OverlayController(private val service: GestureAccessibilityService) {
             deactivateGamepadFocus()
             buttonViews.keys.toList().forEach { removeButtonWindow(it) }
             buttonViews.clear()
+            gamePointViews.keys.toList().forEach { removeGamePointWindow(it) }
+            gamePointViews.clear()
+            gamePointEditing = false
         } catch (t: Throwable) {
             t.printStackTrace()
         }
@@ -266,6 +277,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
             cursorY = cursorY.coerceIn(0f, screenH.toFloat())
             updateCursor()
             buttonViews.values.forEach { refreshButton(it) }
+            gamePointViews.values.forEach { refreshGamePoint(it) }
         } catch (t: Throwable) {
             t.printStackTrace()
         }
@@ -466,6 +478,9 @@ class OverlayController(private val service: GestureAccessibilityService) {
     }
 
     fun panelVisible(): Boolean = panelVisible
+
+    /** 游戏模式是否开启（供服务按键路由判断） */
+    fun gameMode(): Boolean = config.gameMode
 
     fun applyPanelOpacity() {
         val p = panel ?: return
@@ -855,10 +870,15 @@ class OverlayController(private val service: GestureAccessibilityService) {
 
     /** 焦点窗聚焦状态随鼠标开关切换（对齐参考应用 同类手柄应用 的实现）。
      *  每次切换都是"先改视图可聚焦性，再改窗口 flags"的固定顺序，避免中间态；
-     *  只在尚未持有焦点时才请求焦点，消除冗余的焦点扰动。 */
+     *  只在尚未持有焦点时才请求焦点，消除冗余的焦点扰动。
+     *  游戏模式（gameMode=true）下任何聚焦申请都被拦截——游戏全程保持焦点。 */
     private fun applyFocusViewFocusable(focusable: Boolean) {
         val v = gamepadView ?: return
         val p = gamepadParams ?: return
+        if (focusable && config.gameMode) {
+            logEvent("focus", "focusable=true blocked by gameMode")
+            return
+        }
         logEvent("focus", if (focusable) "focusable=true" else "focusable=false")
         if (focusable) {
             p.flags = p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
@@ -893,6 +913,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
      * 应用界面鼠标就没了、摇杆失灵，体验灾难。鼠标只由 L3/按钮/空闲超时(默认关)控制。
      */
     fun toggleMouse() {
+        if (config.gameMode) return // 游戏模式：禁用鼠标开关（不抢焦点）
         mouseActive = !mouseActive
         logEvent("mouse", if (mouseActive) "ON" else "OFF")
         if (mouseActive) {
@@ -1037,6 +1058,10 @@ class OverlayController(private val service: GestureAccessibilityService) {
         val name = ConfigStore.keyNameOf(keyCode) ?: return false
         logKeyEvent(keyCode, name, down, "onGamepadKey")
         val cfg = config
+        // 游戏模式：按键→点位直连，全程不依赖焦点窗
+        if (cfg.gameMode) {
+            return onGameModeKey(name, down, event)
+        }
         // 鼠标未激活：仅响应唤出键与映射为"唤出/隐藏光标"的键，其余放行（回落给应用）
         if (!mouseActive) {
             val isToggle = name == cfg.toggleKey || cfg.gamepadMap[name] == Action.TOGGLE_MOUSE.id
@@ -1073,6 +1098,182 @@ class OverlayController(private val service: GestureAccessibilityService) {
             else execute(action)
         }
         return true
+    }
+
+    // ================= 游戏模式（不使用焦点窗） =================
+
+    /** 游戏模式开关。开启后：立即让出焦点、隐藏光标，之后所有按键走点位直连映射。 */
+    fun setGameMode(on: Boolean) {
+        val cfg = config
+        if (cfg.gameMode == on) return
+        cfg.gameMode = on
+        saveConfig()
+        logEvent("gameMode", if (on) "ON" else "OFF")
+        if (on) {
+            focusHeld = false
+            applyFocusViewFocusable(false) // 让出焦点，游戏全程保持
+            hideCursor()
+            setGamePointEditing(false)
+            setEditing(false)
+        }
+        refreshModeButtons()
+    }
+
+    /** 游戏模式按键处理：绑定串 → 执行（点击/长按/滑动/系统动作）。未绑定返回 false 放行给游戏。 */
+    private fun onGameModeKey(name: String, down: Boolean, event: KeyEvent?): Boolean {
+        val binding = config.gameKeyMap[name] ?: return false
+        if (!down) {
+            stopGameRepeat(name)
+            return true
+        }
+        if (event != null && event.repeatCount > 0) return true // 滑动连发由内部定时器管理
+        val ok = executeGameBinding(binding, name)
+        if (ok) haptic()
+        return ok
+    }
+
+    private fun executeGameBinding(binding: String, keyName: String): Boolean {
+        val s = GestureAccessibilityService.instance ?: return false
+        val prefix = binding.substringBefore(':')
+        val point = if (binding.contains(':')) {
+            val id = binding.substringAfter(':').toLongOrNull()
+            config.gamePoints.firstOrNull { it.id == id }
+        } else null
+        val px = (point?.x ?: 0.5f) * screenW
+        val py = (point?.y ?: 0.5f) * screenH
+        val dist = dp(config.gameSwipeDistance).toFloat()
+        lastActivity = System.currentTimeMillis()
+        logEvent("gameKey", "$keyName -> $binding")
+        when (prefix) {
+            "tap" -> { injectWithRetry { cb -> s.tap(px, py, onResult = cb) }; return true }
+            "longpress" -> { injectWithRetry { cb -> s.longPress(px, py, onResult = cb) }; return true }
+            "swipe_up" -> { injectWithRetry { cb -> s.swipe(px, py, px, py - dist, 260, cb) }; scheduleGameRepeat(binding, keyName); return true }
+            "swipe_down" -> { injectWithRetry { cb -> s.swipe(px, py, px, py + dist, 260, cb) }; scheduleGameRepeat(binding, keyName); return true }
+            "swipe_left" -> { injectWithRetry { cb -> s.swipe(px, py, px - dist, py, 260, cb) }; scheduleGameRepeat(binding, keyName); return true }
+            "swipe_right" -> { injectWithRetry { cb -> s.swipe(px, py, px + dist, py, 260, cb) }; scheduleGameRepeat(binding, keyName); return true }
+            else -> {
+                when (binding) {
+                    "home" -> performGlobalThrottled(Action.HOME)
+                    "back" -> performGlobalThrottled(Action.BACK)
+                    "recents" -> performGlobalThrottled(Action.RECENTS)
+                    "notifications" -> performGlobalThrottled(Action.NOTIFICATIONS)
+                    "quick_settings" -> performGlobalThrottled(Action.QUICK_SETTINGS)
+                    "screenshot" -> performGlobalThrottled(Action.SCREENSHOT)
+                    "vol_up" -> performGlobalThrottled(Action.VOLUME_UP)
+                    "vol_down" -> performGlobalThrottled(Action.VOLUME_DOWN)
+                    "mute" -> execute(Action.MUTE)
+                    "media_play_pause" -> execute(Action.MEDIA_PLAY_PAUSE)
+                    "toggle_panel" -> togglePanel()
+                    else -> return false
+                }
+                return true
+            }
+        }
+    }
+
+    /** 滑动绑定按住连发：按住期间每 300ms 重复一次滑动（松开停止） */
+    private var gameRepeatKey: String? = null
+    private var gameRepeatBinding: String = ""
+    private val gameRepeatRunnable = object : Runnable {
+        override fun run() {
+            val b = gameRepeatBinding
+            if (gameRepeatKey != null && b.startsWith("swipe_")) {
+                executeGameBinding(b, gameRepeatKey ?: "")
+                tickHandler.postDelayed(this, 300)
+            }
+        }
+    }
+
+    private fun scheduleGameRepeat(binding: String, keyName: String) {
+        gameRepeatKey = keyName
+        gameRepeatBinding = binding
+        tickHandler.removeCallbacks(gameRepeatRunnable)
+        tickHandler.postDelayed(gameRepeatRunnable, 300)
+    }
+
+    private fun stopGameRepeat(keyName: String) {
+        if (gameRepeatKey == keyName) {
+            gameRepeatKey = null
+            gameRepeatBinding = ""
+            tickHandler.removeCallbacks(gameRepeatRunnable)
+        }
+    }
+
+    // ================= 游戏模式点位编辑 =================
+
+    /** 点位编辑开关：编辑时在屏幕上显示可拖动标记（与自定义按键编辑互斥） */
+    fun setGamePointEditing(on: Boolean) {
+        if (gamePointEditing == on) return
+        gamePointEditing = on
+        if (on) {
+            setEditing(false)
+            picker.hide()
+            refreshGamePoints()
+        } else {
+            gamePointViews.keys.toList().forEach { removeGamePointWindow(it) }
+            gamePointViews.clear()
+        }
+    }
+
+    fun gamePointEditing(): Boolean = gamePointEditing
+
+    private fun refreshGamePoints() {
+        gamePointViews.keys.toList().forEach { removeGamePointWindow(it) }
+        gamePointViews.clear()
+        if (!gamePointEditing) return
+        config.gamePoints.forEach { addGamePointWindow(it) }
+    }
+
+    private fun addGamePointWindow(p: GamePoint) {
+        if (gamePointViews.containsKey(p.id)) return
+        val size = dp(30)
+        val v = GamePointView(ctx, p, this)
+        val lp = baseParams(size, size).apply {
+            x = (p.x * screenW - size / 2f).toInt()
+            y = (p.y * screenH - size / 2f).toInt()
+        }
+        wm.addView(v, lp)
+        gamePointViews[p.id] = v
+    }
+
+    private fun removeGamePointWindow(id: Long) {
+        gamePointViews.remove(id)?.let { runCatching { wm.removeView(it) } }
+    }
+
+    fun refreshGamePoint(view: GamePointView) {
+        val p = view.point
+        val size = dp(30)
+        val lp = baseParams(size, size).apply {
+            x = (p.x * screenW - size / 2f).toInt()
+            y = (p.y * screenH - size / 2f).toInt()
+        }
+        runCatching { wm.updateViewLayout(view, lp) }
+    }
+
+    fun addGamePoint(): GamePoint? {
+        if (config.gamePoints.size >= 10) {
+            Toast.makeText(ctx, "最多 10 个点位", Toast.LENGTH_SHORT).show()
+            return null
+        }
+        val p = GamePoint(
+            id = System.currentTimeMillis(),
+            label = "P${config.gamePoints.size + 1}",
+            x = 0.5f,
+            y = 0.5f
+        )
+        config.gamePoints.add(p)
+        saveConfig()
+        if (gamePointEditing) addGamePointWindow(p)
+        return p
+    }
+
+    fun deleteGamePoint(id: Long) {
+        config.gamePoints.removeAll { it.id == id }
+        // 清理引用该点位的按键绑定
+        config.gameKeyMap.keys.filter { k -> config.gameKeyMap[k]?.endsWith(":$id") == true }
+            .forEach { k -> config.gameKeyMap.remove(k) }
+        removeGamePointWindow(id)
+        saveConfig()
     }
 
     /** 全局系统动作限流：快速连按（如 B/START）不再密集触发系统动作，防系统看门狗误杀 */
@@ -1389,6 +1590,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
     // ================= 编辑模式 =================
 
     fun setEditing(on: Boolean) {
+        if (on) setGamePointEditing(false) // 与点位编辑互斥
         editMode = on
         joystick?.active = !on
         buttonViews.values.forEach { it.setEditMode(on) }

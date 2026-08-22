@@ -74,6 +74,14 @@ data class MappedButton(
     var sizeDp: Int
 )
 
+/** 游戏模式点位：屏幕上一个固定坐标（手柄按键直接点击/滑动这里）。x/y 为百分比坐标 (0..1)。 */
+data class GamePoint(
+    val id: Long,
+    var label: String,
+    var x: Float,
+    var y: Float
+)
+
 /** 全部用户配置 */
 data class AppConfig(
     var cursorSpeed: Float = 6f,       // 虚拟摇杆光标速度倍率
@@ -98,6 +106,10 @@ data class AppConfig(
     var buttonsVisible: Boolean = true,// 自定义按键是否显示
     var mappingVersion: Int = 2,       // 默认映射版本（用于升级迁移）
     var focusIdleRelease: Boolean = false, // 空闲 2 分钟让出窗口焦点（游戏友好）。默认关=鼠标激活期间始终持有焦点
+    var gameMode: Boolean = false,     // 游戏模式：完全不使用焦点窗（游戏全程保持焦点），按键→屏幕点位直连
+    var gameSwipeDistance: Int = 180,  // 游戏模式滑动距离（dp，80..400）
+    var gameKeyMap: MutableMap<String, String> = mutableMapOf(), // 游戏模式：手柄键名 -> 绑定串
+    var gamePoints: MutableList<GamePoint> = mutableListOf(),    // 游戏模式点位
     var gamepadMap: MutableMap<String, String> = mutableMapOf(), // 手柄键名 -> 动作 id
     var buttons: MutableList<MappedButton> = mutableListOf()
 ) {
@@ -116,6 +128,18 @@ data class AppConfig(
         }
         val gm = JSONObject()
         gamepadMap.forEach { (k, v) -> gm.put(k, v) }
+        val gkm = JSONObject()
+        gameKeyMap.forEach { (k, v) -> gkm.put(k, v) }
+        val gps = JSONArray()
+        gamePoints.forEach { p ->
+            gps.put(
+                JSONObject()
+                    .put("id", p.id)
+                    .put("label", p.label)
+                    .put("x", p.x.toDouble())
+                    .put("y", p.y.toDouble())
+            )
+        }
         return JSONObject()
             .put("cursorSpeed", cursorSpeed.toDouble())
             .put("scrollStep", scrollStep)
@@ -139,6 +163,10 @@ data class AppConfig(
             .put("buttonsVisible", buttonsVisible)
             .put("mappingVersion", mappingVersion)
             .put("focusIdleRelease", focusIdleRelease)
+            .put("gameMode", gameMode)
+            .put("gameSwipeDistance", gameSwipeDistance)
+            .put("gameKeyMap", gkm)
+            .put("gamePoints", gps)
             .put("gamepadMap", gm)
             .put("buttons", arr)
     }
@@ -171,6 +199,28 @@ data class AppConfig(
                 cfg.buttonsVisible = o.optBoolean("buttonsVisible", true)
                 cfg.mappingVersion = o.optInt("mappingVersion", 1)
                 cfg.focusIdleRelease = o.optBoolean("focusIdleRelease", false)
+                cfg.gameMode = o.optBoolean("gameMode", false)
+                cfg.gameSwipeDistance = o.optInt("gameSwipeDistance", 180).coerceIn(80, 400)
+                val gkm = o.optJSONObject("gameKeyMap")
+                if (gkm != null) {
+                    val it = gkm.keys()
+                    while (it.hasNext()) {
+                        val k = it.next()
+                        cfg.gameKeyMap[k] = gkm.optString(k, "")
+                    }
+                }
+                val gps = o.optJSONArray("gamePoints") ?: JSONArray()
+                for (i in 0 until gps.length()) {
+                    val p = gps.getJSONObject(i)
+                    cfg.gamePoints.add(
+                        GamePoint(
+                            id = p.optLong("id", System.currentTimeMillis() + i),
+                            label = p.optString("label", "点${i + 1}"),
+                            x = p.optDouble("x", 0.5).toFloat().coerceIn(0f, 1f),
+                            y = p.optDouble("y", 0.5).toFloat().coerceIn(0f, 1f)
+                        )
+                    )
+                }
                 val gm = o.optJSONObject("gamepadMap")
                 if (gm != null) {
                     val it = gm.keys()

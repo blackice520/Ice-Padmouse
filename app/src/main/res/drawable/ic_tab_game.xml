@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 准星：游戏模式（屏幕点位映射） -->
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M12,2 A10,10 0 1,1 12,22 A10,10 0 1,1 12,2 z M12,4 A8,8 0 1,0 12,20 A8,8 0 1,0 12,4 z M11,6 h2 v4 h4 v2 h-4 v4 h-2 v-4 H7 v-2 h4 z" />
+</vector>
