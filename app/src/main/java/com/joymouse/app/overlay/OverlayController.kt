@@ -1035,7 +1035,10 @@ class OverlayController(private val service: GestureAccessibilityService) {
     fun onGamepadMotion(event: MotionEvent): Boolean {
         if (!mouseActive) return false
         val src = event.source
-        val isGamepad = (src and InputDevice.SOURCE_GAMEPAD) != 0 || (src and InputDevice.SOURCE_JOYSTICK) != 0
+        // 兼容三来源：GAMEPAD/JOYSTICK（摇杆）、DPAD（部分系统十字键 HAT 轴以此来源上报，Vivo 实测）
+        val isGamepad = (src and InputDevice.SOURCE_GAMEPAD) != 0 ||
+            (src and InputDevice.SOURCE_JOYSTICK) != 0 ||
+            (src and InputDevice.SOURCE_DPAD) != 0
         if (!isGamepad || event.actionMasked != MotionEvent.ACTION_MOVE) return false
         // 摇杆轴事件到达 = 手柄正在使用：续期焦点保持
         renewFocusHold()
