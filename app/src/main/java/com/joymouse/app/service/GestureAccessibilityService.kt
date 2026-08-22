@@ -297,11 +297,11 @@ class GestureAccessibilityService : AccessibilityService() {
                     false
                 }
             Action.VOLUME_UP -> {
-                am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, 0)
+                am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, AudioManager.FLAG_SHOW_UI)
                 true
             }
             Action.VOLUME_DOWN -> {
-                am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, 0)
+                am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, AudioManager.FLAG_SHOW_UI)
                 true
             }
             else -> false // 非全局动作

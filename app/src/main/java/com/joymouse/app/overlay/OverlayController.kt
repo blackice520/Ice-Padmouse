@@ -123,12 +123,16 @@ class OverlayController(private val service: GestureAccessibilityService) {
     private var focusHeld = false
     private var lastGamepadInput = 0L
     private val FOCUS_HOLD_MS = 2 * 60 * 1000L
+    /** 全局动作（返回/通知/快捷设置）让出焦点期间，抑制按键重新抢焦点 */
+    private var focusSuppressUntil = 0L
 
-    /** 手柄输入活跃：续期焦点保持；若当前未持有焦点则申请（按键路径在无焦点时也可靠） */
+    /** 手柄输入活跃：续期焦点保持；若当前未持有焦点则申请（按键路径在无焦点时也可靠）。
+     *  全局动作（返回等）让出焦点期间 suppress 掉重新抢焦点——否则触发动作的那个
+     *  按键本身就会立刻把焦点抢回来，注入的返回键又落回我们的焦点窗被吞。 */
     private fun renewFocusHold() {
         if (config.gameMode) return // 游戏模式：永远不申请焦点
         lastGamepadInput = System.currentTimeMillis()
-        if (!focusHeld && mouseActive) {
+        if (!focusHeld && mouseActive && System.currentTimeMillis() >= focusSuppressUntil) {
             focusHeld = true
             applyFocusViewFocusable(true)
         }
@@ -1047,9 +1051,35 @@ class OverlayController(private val service: GestureAccessibilityService) {
         if (kotlin.math.abs(ry) <= kotlin.math.abs(rw)) ry = rw
         scrollX = rx
         scrollY = ry
+        // 十字键以 HAT 轴上报的手柄：把 AXIS_HAT_X/Y 翻译成十字键事件
+        // （本手柄十字键从未产生过 KeyEvent，音量等映射因此完全无效）
+        val hatX = event.getAxisValue(MotionEvent.AXIS_HAT_X)
+        val hatY = event.getAxisValue(MotionEvent.AXIS_HAT_Y)
+        val dir = when {
+            hatY < -0.5f -> 1
+            hatY > 0.5f -> 2
+            hatX < -0.5f -> 3
+            hatX > 0.5f -> 4
+            else -> 0
+        }
+        if (dir != hatDir) {
+            if (hatDir != 0) onGamepadKey(hatKeyCode(hatDir), false, null)
+            hatDir = dir
+            if (dir != 0) onGamepadKey(hatKeyCode(dir), true, null)
+        }
         lastMotionTime = System.currentTimeMillis()
         lastActivity = lastMotionTime
         return true
+    }
+
+    /** 十字键 HAT 方向 → KeyEvent keyCode（1上 2下 3左 4右） */
+    private var hatDir = 0
+
+    private fun hatKeyCode(dir: Int): Int = when (dir) {
+        1 -> KeyEvent.KEYCODE_DPAD_UP
+        2 -> KeyEvent.KEYCODE_DPAD_DOWN
+        3 -> KeyEvent.KEYCODE_DPAD_LEFT
+        else -> KeyEvent.KEYCODE_DPAD_RIGHT
     }
 
     /** 手柄按键事件（来自焦点窗或服务全局通道；两条路径都处理，用消抖去重） */
@@ -1351,22 +1381,32 @@ class OverlayController(private val service: GestureAccessibilityService) {
         if (now - lastGlobalActionTime < 1000) return
         lastGlobalActionTime = now
         // BACK/NOTIFICATIONS/QUICK_SETTINGS 在 MagicOS 上以"注入按键事件"实现，
-        // 注入的键会路由到当前持有焦点的窗口——正是我们的 15×15 焦点窗，被自己
-        // 吞掉后应用收不到。因此动作前临时让出焦点、动作后 400ms 取回（单次低频，
-        // 与滚动式高频振荡完全不同）。HOME/RECENTS/SCREENSHOT 走 WMS/SystemUI
-        // 通道，不受焦点影响，无需处理。
+        // 注入的键路由到当前焦点窗——正是我们的 15×15 捕获窗，被自己吞掉。
+        // 修法：先让出焦点 → 等目标应用拿到焦点（300ms）→ 再注入按键 →
+        // 再等一拍（700ms）取回焦点。立即注入会落在"无焦点窗口"状态：键被丢
+        // 且输入状态发卡。让出期间 focusHeld 置 false：期间任意手柄按键都会
+        // 经 renewFocusHold 重新取得焦点（自愈）。
         val needsFocusRelease = action == Action.BACK ||
             action == Action.NOTIFICATIONS || action == Action.QUICK_SETTINGS
-        val restore = needsFocusRelease && focusHeld && mouseActive && !config.gameMode
+        val restore = needsFocusRelease && mouseActive && !config.gameMode
         if (restore) {
             logEvent("global", "${action.id} focus released before")
+            focusHeld = false
+            focusSuppressUntil = now + 1500 // 期间禁止按键重新抢焦点
             applyFocusViewFocusable(false)
-        }
-        GestureAccessibilityService.instance?.performGlobal(action)
-        if (restore) {
             tickHandler.postDelayed({
-                if (mouseActive && focusHeld && !config.gameMode) applyFocusViewFocusable(true)
-            }, 400)
+                GestureAccessibilityService.instance?.performGlobal(action)
+            }, 300)
+            tickHandler.postDelayed({
+                focusSuppressUntil = 0L
+                if (mouseActive && !config.gameMode) {
+                    focusHeld = true
+                    lastGamepadInput = System.currentTimeMillis()
+                    applyFocusViewFocusable(true)
+                }
+            }, 700)
+        } else {
+            GestureAccessibilityService.instance?.performGlobal(action)
         }
     }
 
