@@ -20,7 +20,6 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import com.joymouse.app.AppLog
-import com.joymouse.app.MainActivity
 import com.joymouse.app.R
 import com.joymouse.app.config.Action
 import com.joymouse.app.config.AppConfig
@@ -89,9 +88,10 @@ class OverlayController(private val service: GestureAccessibilityService) {
     private var mouseKeyView: TextView? = null
     internal val picker = ActionPicker(this)
 
-    /** 游戏模式点位标记窗口（编辑位置时显示） */
+    /** 游戏模式点位标记窗口（编辑或"始终显示"时可见） */
     internal val gamePointViews = LinkedHashMap<Long, GamePointView>()
     private var gamePointEditing = false
+    internal val gameBindingPicker = GameBindingPicker(this)
 
     /** 手柄输入焦点捕获窗（1×1 可聚焦无障碍窗口，位于 (0,0)） */
     private var gamepadView: GamepadInputView? = null
@@ -259,6 +259,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
             hidePanel()
             hideEditBar()
             picker.hide()
+            gameBindingPicker.hide()
             deactivateGamepadFocus()
             buttonViews.keys.toList().forEach { removeButtonWindow(it) }
             buttonViews.clear()
@@ -1205,26 +1206,33 @@ class OverlayController(private val service: GestureAccessibilityService) {
 
     // ================= 游戏模式点位编辑 =================
 
-    /** 点位编辑开关：编辑时在屏幕上显示可拖动标记（与自定义按键编辑互斥） */
+    /** 点位编辑开关：编辑时标记可拖动/长按绑定；非编辑时若开启"始终显示"则保留标记（穿透触摸） */
     fun setGamePointEditing(on: Boolean) {
         if (gamePointEditing == on) return
         gamePointEditing = on
         if (on) {
             setEditing(false)
             picker.hide()
-            refreshGamePoints()
         } else {
-            gamePointViews.keys.toList().forEach { removeGamePointWindow(it) }
-            gamePointViews.clear()
+            gameBindingPicker.hide()
         }
+        refreshGamePoints()
     }
 
     fun gamePointEditing(): Boolean = gamePointEditing
 
+    /** 标记是否显示：编辑中，或用户开启"始终显示" */
+    private fun gamePointsShown(): Boolean = gamePointEditing || config.gamePointsVisible
+
+    /** 标记显隐开关变化（设置页"显示点位标记"） */
+    fun onGamePointsVisibilityChanged() {
+        refreshGamePoints()
+    }
+
     private fun refreshGamePoints() {
         gamePointViews.keys.toList().forEach { removeGamePointWindow(it) }
         gamePointViews.clear()
-        if (!gamePointEditing) return
+        if (!gamePointsShown()) return
         config.gamePoints.forEach { addGamePointWindow(it) }
     }
 
@@ -1233,6 +1241,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
         val size = dp(30)
         val v = GamePointView(ctx, p, this)
         val lp = baseParams(size, size).apply {
+            // 非编辑状态：显示但穿透触摸，绝不干扰游戏操作
+            if (!gamePointEditing) flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
             x = (p.x * screenW - size / 2f).toInt()
             y = (p.y * screenH - size / 2f).toInt()
         }
@@ -1280,18 +1290,15 @@ class OverlayController(private val service: GestureAccessibilityService) {
         saveConfig()
     }
 
-    /** 长按点位标记：拉起主界面并弹出该点位的按键绑定设置 */
+    /** 长按点位标记：在当前屏幕弹出绑定面板（不跳回应用、不抢焦点） */
     fun onGamePointLongPressed(id: Long) {
-        haptic()
-        try {
-            val intent = android.content.Intent(ctx, MainActivity::class.java)
-                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                .putExtra(MainActivity.EXTRA_GAME_POINT_BINDING, id)
-            ctx.startActivity(intent)
-        } catch (t: Throwable) {
-            logEvent("gamePoint", "longPress open activity failed: ${t.javaClass.simpleName}")
-        }
+        val p = config.gamePoints.firstOrNull { it.id == id } ?: return
+        hapticFeedback()
+        gameBindingPicker.showFor(p)
     }
+
+    /** 供悬浮面板使用的触觉反馈（对外公开） */
+    fun hapticFeedback() = haptic()
 
     /** 全局系统动作限流：快速连按（如 B/START）不再密集触发系统动作，防系统看门狗误杀 */
     private var lastGlobalActionTime = 0L
