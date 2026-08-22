@@ -20,6 +20,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import com.joymouse.app.AppLog
+import com.joymouse.app.MainActivity
 import com.joymouse.app.R
 import com.joymouse.app.config.Action
 import com.joymouse.app.config.AppConfig
@@ -1277,6 +1278,19 @@ class OverlayController(private val service: GestureAccessibilityService) {
             .forEach { k -> config.gameKeyMap.remove(k) }
         removeGamePointWindow(id)
         saveConfig()
+    }
+
+    /** 长按点位标记：拉起主界面并弹出该点位的按键绑定设置 */
+    fun onGamePointLongPressed(id: Long) {
+        haptic()
+        try {
+            val intent = android.content.Intent(ctx, MainActivity::class.java)
+                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                .putExtra(MainActivity.EXTRA_GAME_POINT_BINDING, id)
+            ctx.startActivity(intent)
+        } catch (t: Throwable) {
+            logEvent("gamePoint", "longPress open activity failed: ${t.javaClass.simpleName}")
+        }
     }
 
     /** 全局系统动作限流：快速连按（如 B/START）不再密集触发系统动作，防系统看门狗误杀 */

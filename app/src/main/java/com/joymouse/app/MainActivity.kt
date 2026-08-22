@@ -197,6 +197,22 @@ class MainActivity : AppCompatActivity() {
 
         buildGamepadMapUi()
         buildGameUi()
+        handleGamePointIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleGamePointIntent(intent)
+    }
+
+    /** 处理"长按点位标记"拉起的绑定设置请求 */
+    private fun handleGamePointIntent(intent: Intent?) {
+        val id = intent?.getLongExtra(EXTRA_GAME_POINT_BINDING, -1L) ?: -1L
+        if (id > 0) {
+            intent?.removeExtra(EXTRA_GAME_POINT_BINDING)
+            findViewById<BottomNavigationView>(R.id.bottomNav).selectedItemId = R.id.nav_game
+            showGamePointBindingDialog(id)
+        }
     }
 
     override fun onResume() {
@@ -428,10 +444,10 @@ class MainActivity : AppCompatActivity() {
         container.addView(distRow)
 
         // 标记透明度
-        container.addView(text("点位标记透明度", 13f, 0xFF333333.toInt(), true))
+        container.addView(text("点位标记透明度（0=完全透明，仍可拖动）", 13f, 0xFF333333.toInt(), true))
         val sbOp = SeekBar(this)
-        sbOp.max = 80 // 20..100 %
-        sbOp.progress = cfg.gamePointOpacity - 20
+        sbOp.max = 100 // 0..100 %
+        sbOp.progress = cfg.gamePointOpacity
         val tvOp = TextView(this).apply { text = "${cfg.gamePointOpacity}%"; textSize = 13f }
         val opRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -442,8 +458,8 @@ class MainActivity : AppCompatActivity() {
         opRow.addView(tvOp)
         sbOp.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
-                cfg.gamePointOpacity = p + 20
-                tvOp.text = "${cfg.gamePointOpacity}%"
+                cfg.gamePointOpacity = p
+                tvOp.text = "$p%"
                 ConfigStore.save(this@MainActivity, cfg)
                 OverlayController.instance?.gamePointViews?.values?.forEach { it.invalidate() }
             }
@@ -606,8 +622,59 @@ class MainActivity : AppCompatActivity() {
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
 
+    /** 长按点位标记 → 为该点位选择手柄按键 + 动作 */
+    private fun showGamePointBindingDialog(pointId: Long) {
+        val cfg = ConfigStore.load(this)
+        val point = cfg.gamePoints.firstOrNull { it.id == pointId }
+        if (point == null) {
+            Toast.makeText(this, "点位不存在", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val keys = gameKeyOrder.map { it to (keyLabels[it] ?: it) }
+        val keyNames = keys.map { it.second }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("${point.label} 绑定哪个手柄按键？")
+            .setItems(keyNames) { d, which ->
+                d.dismiss()
+                val key = keys[which].first
+                val actions = listOf(
+                    "tap" to "点击",
+                    "longpress" to "长按",
+                    "swipe_up" to "上滑",
+                    "swipe_down" to "下滑",
+                    "swipe_left" to "左滑",
+                    "swipe_right" to "右滑",
+                    "none" to "取消绑定"
+                )
+                val actionNames = actions.map { it.second }.toTypedArray()
+                val current = cfg.gameKeyMap[key]
+                val curIdx = when {
+                    current == null -> actions.indexOfFirst { it.first == "none" }
+                    current.endsWith(":$pointId") ->
+                        actions.indexOfFirst { it.first != "none" && current.startsWith(it.first) }.coerceAtLeast(0)
+                    else -> -1 // 该键已绑定其他点位：不高亮
+                }
+                AlertDialog.Builder(this)
+                    .setTitle("${keys[which].second} 在 ${point.label} 的动作")
+                    .setSingleChoiceItems(actionNames, curIdx) { d2, w ->
+                        val act = actions[w].first
+                        if (act == "none") cfg.gameKeyMap.remove(key)
+                        else cfg.gameKeyMap[key] = "$act:$pointId"
+                        ConfigStore.save(this, cfg)
+                        d2.dismiss()
+                        Toast.makeText(this, "${keys[which].second} → ${actions[w].second} ${point.label}", Toast.LENGTH_SHORT).show()
+                        buildGameUi()
+                    }
+                    .setNegativeButton("取消", null)
+                    .show()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
     /** 供状态栏通知等外部入口复用 */
     companion object {
+        const val EXTRA_GAME_POINT_BINDING = "game_point_binding"
         fun start(context: Context) {
             context.startActivity(
                 Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
