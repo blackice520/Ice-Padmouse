@@ -19,6 +19,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import com.joymouse.app.AppLog
 import com.joymouse.app.R
 import com.joymouse.app.config.Action
 import com.joymouse.app.config.AppConfig
@@ -109,6 +110,34 @@ class OverlayController(private val service: GestureAccessibilityService) {
     var mouseActive = false
         private set
 
+    // ---- 焦点按需保持 ----
+    // 焦点窗（1×1 手柄捕获窗）只在"手柄正在被使用"时持有输入焦点：
+    // 手柄按键/摇杆事件到达即续期，空闲 FOCUS_HOLD_MS 后让出焦点（窗口保留、不销毁）。
+    // 实测证据（dumpsys window）：旧实现长期持有焦点时，系统把我们的 1×1 窗口当作
+    // imeInputTarget——"不可见窗口霸占输入焦点"正是 MagicOS AppEyeFocusWindow 探针
+    // 最可疑的触发态；让出焦点后按键仍经服务 onKeyEvent（filterKeyEvents）送达，
+    // 只有摇杆轴事件依赖焦点窗，因此空闲让出几乎不损失功能。
+    private var focusHeld = false
+    private var lastGamepadInput = 0L
+    private val FOCUS_HOLD_MS = 5000L
+
+    /** 手柄输入活跃：续期焦点保持；若当前未持有焦点则申请（按键路径在无焦点时也可靠） */
+    private fun renewFocusHold() {
+        lastGamepadInput = System.currentTimeMillis()
+        if (!focusHeld && mouseActive) {
+            focusHeld = true
+            applyFocusViewFocusable(true)
+        }
+    }
+
+    /** 空闲超时让出焦点（tick 中调用） */
+    private fun maybeReleaseFocusHold() {
+        if (focusHeld && System.currentTimeMillis() - lastGamepadInput > FOCUS_HOLD_MS) {
+            focusHeld = false
+            applyFocusViewFocusable(false)
+        }
+    }
+
     /** 左摇杆速度向量（物理手柄，归一化，由 tick 处理） */
     private var stickX = 0f
     private var stickY = 0f
@@ -133,6 +162,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
     private var vScrollCooldownUntil = 0L
     /** 触摸休眠冷却：鼠标刚关闭 1.5 秒内忽略触摸，避免反复开关 */
     private var lastOutsideDismiss = 0L
+    /** outside 触摸日志限流时间戳 */
+    private var lastOutsideLog = 0L
     /** 左键按下状态机：held=按下，dragging=已转拖拽 */
     private var leftHeld = false
     private var leftDragging = false
@@ -203,6 +234,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
             activateGamepadFocus()
             tickHandler.removeCallbacks(tickRunnable)
             tickHandler.post(tickRunnable)
+            heartbeatHandler.removeCallbacks(heartbeatRunnable)
+            heartbeatHandler.post(heartbeatRunnable)
         } catch (t: Throwable) {
             t.printStackTrace()
         }
@@ -212,6 +245,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
         instance = null
         idleHandler.removeCallbacks(idleRunnable)
         tickHandler.removeCallbacks(tickRunnable)
+        heartbeatHandler.removeCallbacks(heartbeatRunnable)
+        focusHeld = false
         try {
             hideCursor()
             hidePanel()
@@ -690,6 +725,13 @@ class OverlayController(private val service: GestureAccessibilityService) {
         picker.setTouchable(!on)
     }
 
+    // ---- 焦点策略（v1.2 定稿） ----
+    // 真·闪退根因（2026-08-22 定位，logcat 可读后证实）：
+    //   MagicOS 的 ZRHungService（system_server 内 AppEyeFocusWindow 探针）以
+    //   "BF and NFW forceStop" 强停本应用并吊销无障碍服务。多次对照实验结论：
+    //   注入期间、注入前后、鼠标开关都不允许再有任何窗口焦点切换——
+    //   焦点只由"焦点按需保持"（手柄活跃期间持有，空闲让出）管理，其他路径一律不动。
+    //   同设备参考应用 Gamepad Mouse 从不切换焦点、从未被强停 → 完全对齐。
     private fun injectWithRetry(dispatch: (onResult: (Boolean) -> Unit) -> Unit) {
         var attempts = 0
         val passthrough = ourTouchCount == 0
@@ -699,17 +741,10 @@ class OverlayController(private val service: GestureAccessibilityService) {
                 attempts++
                 // 每次注入前刷新活动时间：注入手势本身也会触发触摸休眠检测，避免被误判为"用户触摸"而关闭鼠标
                 lastActivity = System.currentTimeMillis()
-                logEvent("inject", "start attempt=$attempts mouseActive=$mouseActive")
+                logEvent("inject", "start attempt=$attempts mouseActive=$mouseActive held=$focusHeld")
                 if (passthrough) setPassthrough(true)
-                // 注入前临时失焦焦点窗，让目标应用(手游)恢复窗口焦点再点击（解决手游失焦点击无效）
-                val restoreFocus = mouseActive
-                if (restoreFocus) applyFocusViewFocusable(false)
                 dispatch { ok ->
-                    logEvent("inject", "done ok=$ok restoreFocus=$restoreFocus")
-                    if (restoreFocus) {
-                        // 注入完成后延迟恢复焦点窗聚焦，给手游足够时间处理这次点击
-                        tickHandler.postDelayed({ if (mouseActive) applyFocusViewFocusable(true) }, 400)
-                    }
+                    logEvent("inject", "done ok=$ok")
                     if (!ok && attempts < 5) {
                         tickHandler.postDelayed(this, 220)
                     } else {
@@ -792,7 +827,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
 
     // ================= 物理手柄（焦点捕获） =================
 
-    /** 激活手柄焦点：添加 1×1 窗口（常驻不销毁）。
+    /** 激活手柄焦点：添加 15×15 窗口（对齐参考应用 Gamepad Mouse 的 15×15 焦点窗——
+     *  同设备从未被强停；1×1 的"隐形可聚焦窗口"更像键盘记录器形态，属探针高危形态）。
      *  聚焦状态跟随鼠标开关：激活=聚焦（接管按键），关闭=不聚焦（按键还给应用/游戏）。 */
     private fun activateGamepadFocus() {
         if (gamepadView != null) {
@@ -801,13 +837,12 @@ class OverlayController(private val service: GestureAccessibilityService) {
         }
         try {
             val v = GamepadInputView(ctx, this)
-            gamepadParams = baseParams(1, 1).apply {
+            // 与参考应用完全一致：NOT_TOUCH_MODAL | LAYOUT_IN_SCREEN | WATCH_OUTSIDE_TOUCH，
+            // 不带 LAYOUT_NO_LIMITS；未激活时补 FLAG_NOT_FOCUSABLE
+            gamepadParams = baseParams(15, 15).apply {
                 flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
                     WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
-                // 启动时 mouseActive=false → 焦点窗 NOT_FOCUSABLE（不抢焦点，避免强停）。
-                // 唤出鼠标后才去掉 NOT_FOCUSABLE（applyFocusViewFocusable）。
                 if (!mouseActive) flags = flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 x = 0
                 y = 0
@@ -820,28 +855,32 @@ class OverlayController(private val service: GestureAccessibilityService) {
         }
     }
 
-    /** 焦点窗聚焦状态随鼠标开关切换（对齐同类应用 同类手柄应用 的实现） */
+    /** 焦点窗聚焦状态随鼠标开关切换（对齐参考应用 同类手柄应用 的实现）。
+     *  每次切换都是"先改视图可聚焦性，再改窗口 flags"的固定顺序，避免中间态；
+     *  只在尚未持有焦点时才请求焦点，消除冗余的焦点扰动。 */
     private fun applyFocusViewFocusable(focusable: Boolean) {
         val v = gamepadView ?: return
         val p = gamepadParams ?: return
         logEvent("focus", if (focusable) "focusable=true" else "focusable=false")
-        p.flags = if (focusable) p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
-        else p.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-        runCatching { wm.updateViewLayout(v, p) }
         if (focusable) {
-            // 对齐同类应用：先标记可聚焦，再延迟到下一消息循环 requestFocus。
-            // 同步直接 requestFocus 会被 MagicOS 判定为"恶意抢焦点"而强停。
+            p.flags = p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
+            runCatching { wm.updateViewLayout(v, p) }
             runCatching {
                 v.setFocusable(true)
                 v.setFocusableInTouchMode(true)
+                // 对齐参考应用：延迟到下一消息循环 requestFocus，且已持有焦点则跳过
                 v.post {
-                    v.requestFocus()
-                    v.requestFocusFromTouch()
+                    if (!v.hasFocus()) v.requestFocus()
                 }
             }
         } else {
-            // 对齐同类应用：休眠时清除焦点
-            runCatching { v.clearFocus() }
+            // 先清焦点再置 FLAG_NOT_FOCUSABLE，避免"窗口不可聚焦但焦点仍在其上"的中间态
+            runCatching {
+                v.setFocusable(false)
+                v.clearFocus()
+            }
+            p.flags = p.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+            runCatching { wm.updateViewLayout(v, p) }
         }
     }
 
@@ -860,6 +899,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
         logEvent("mouse", if (mouseActive) "ON" else "OFF")
         if (mouseActive) {
             showCursor()
+            focusHeld = true
+            lastGamepadInput = System.currentTimeMillis()
             applyFocusViewFocusable(true)
         } else {
             hideCursor()
@@ -873,6 +914,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
             vJoyY = 0f
             vJoySpeed = 0f
             // 鼠标关闭：焦点窗让出焦点（FLAG_NOT_FOCUSABLE），触摸/按键穿透给下层应用，手指恢复正常操作
+            focusHeld = false
             applyFocusViewFocusable(false)
         }
         refreshModeButtons()
@@ -885,10 +927,14 @@ class OverlayController(private val service: GestureAccessibilityService) {
      * 关闭后 1.5s 冷却防反复。
      */
     fun onOutsideTouch(x: Float, y: Float) {
-        logEvent("outside", "x=$x y=$y mouseActive=$mouseActive")
+        // 高频事件（每次触摸都来）：日志限流 500ms，避免刷盘拖慢主线程
+        val now = System.currentTimeMillis()
+        if (now - lastOutsideLog > 500) {
+            lastOutsideLog = now
+            logEvent("outside", "x=$x y=$y mouseActive=$mouseActive")
+        }
         if (!mouseActive || editMode) return
         if (leftHeld || dragging) return
-        val now = System.currentTimeMillis()
         if (now - lastOutsideDismiss < 1500) return
         if (now - lastActivity < 300) return
         if (isTouchOnOurWindows(x, y)) return
@@ -919,12 +965,10 @@ class OverlayController(private val service: GestureAccessibilityService) {
     private var lastKeyActionTime = 0L
     private var lastKeyAction: Action? = null
 
-    /** 按键落盘诊断（荣耀 logcat 加密） */
+    /** 按键落盘诊断（后台线程写入，不拖慢主线程） */
     private fun logKeyEvent(keyCode: Int, name: String, down: Boolean, from: String) {
         try {
-            val line = "${System.currentTimeMillis()} [$from] code=$keyCode name=$name down=$down\n"
-            java.io.FileOutputStream(java.io.File(ctx.filesDir, "keys.log"), true)
-                .use { it.write(line.toByteArray()) }
+            AppLog.write(ctx, "keys.log", "${System.currentTimeMillis()} [$from] code=$keyCode name=$name down=$down")
         } catch (_: Throwable) {
         }
     }
@@ -932,9 +976,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
     /** 滚动状态落盘诊断：定位看门狗上限为何失效 */
     private fun logScroll(msg: String) {
         try {
-            val line = "${System.currentTimeMillis()} [scroll] $msg\n"
-            java.io.FileOutputStream(java.io.File(ctx.filesDir, "scroll.log"), true)
-                .use { it.write(line.toByteArray()) }
+            AppLog.write(ctx, "scroll.log", "${System.currentTimeMillis()} [scroll] $msg")
         } catch (_: Throwable) {
         }
     }
@@ -942,10 +984,26 @@ class OverlayController(private val service: GestureAccessibilityService) {
     /** 统一事件日志：记录焦点切换/鼠标开关/触摸/注入等关键事件，强停后据此定位真实原因 */
     private fun logEvent(tag: String, msg: String) {
         try {
-            val line = "${System.currentTimeMillis()} [$tag] $msg\n"
-            java.io.FileOutputStream(java.io.File(ctx.filesDir, "events.log"), true)
-                .use { it.write(line.toByteArray()) }
+            AppLog.write(ctx, "events.log", "${System.currentTimeMillis()} [$tag] $msg")
         } catch (_: Throwable) {
+        }
+    }
+
+    /** 心跳：每 5 秒记录一次关键状态。强停瞬间的最新心跳+日志尾部即现场快照 */
+    private val heartbeatHandler = Handler(Looper.getMainLooper())
+    private val heartbeatRunnable = object : Runnable {
+        override fun run() {
+            try {
+                val gv = gamepadView
+                logEvent(
+                    "hb",
+                    "mouse=$mouseActive focus=${gv?.hasFocus()} held=$focusHeld " +
+                        "panel=$panelVisible edit=$editMode cursor=${cursor != null} " +
+                        "buttons=${buttonViews.size} picker=${picker.isVisible()}"
+                )
+            } catch (_: Throwable) {
+            }
+            heartbeatHandler.postDelayed(this, 5000)
         }
     }
 
@@ -955,6 +1013,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
         val src = event.source
         val isGamepad = (src and InputDevice.SOURCE_GAMEPAD) != 0 || (src and InputDevice.SOURCE_JOYSTICK) != 0
         if (!isGamepad || event.actionMasked != MotionEvent.ACTION_MOVE) return false
+        // 摇杆轴事件到达 = 手柄正在使用：续期焦点保持
+        renewFocusHold()
         // 左摇杆：AXIS_X / AXIS_Y
         stickX = event.getAxisValue(MotionEvent.AXIS_X)
         stickY = event.getAxisValue(MotionEvent.AXIS_Y)
@@ -988,6 +1048,8 @@ class OverlayController(private val service: GestureAccessibilityService) {
             }
             return false
         }
+        // 按键到达 = 手柄正在使用：续期焦点保持（保证后续摇杆轴事件能被焦点窗捕获）
+        renewFocusHold()
         // 唤出键：切换鼠标开关（仅在按下瞬间）
         if (name == cfg.toggleKey) {
             if (down && (event == null || event.repeatCount == 0)) toggleMouse()
@@ -1082,6 +1144,9 @@ class OverlayController(private val service: GestureAccessibilityService) {
         val cfg = config
         val s = GestureAccessibilityService.instance ?: return
         val now = System.currentTimeMillis()
+
+        // 手柄空闲让出焦点（焦点按需保持）
+        maybeReleaseFocusHold()
 
         // 摇杆松开兜底：250ms 无轴事件则速度/滚动方向归零（部分手柄松开时不发归零事件）
         if (now - lastMotionTime > 250) {

@@ -5,6 +5,7 @@ import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.accessibilityservice.GestureDescription.StrokeDescription
 import android.content.Context
+import android.content.Intent
 import android.graphics.Path
 import android.media.AudioManager
 import android.os.Build
@@ -12,6 +13,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
+import com.joymouse.app.AppLog
 import com.joymouse.app.config.Action
 import com.joymouse.app.config.ConfigStore
 import com.joymouse.app.overlay.OverlayController
@@ -32,17 +34,34 @@ class GestureAccessibilityService : AccessibilityService() {
 
     private val handler = Handler(Looper.getMainLooper())
 
+    override fun onCreate() {
+        super.onCreate()
+        AppLog.writeSync(this, "events.log",
+            "${System.currentTimeMillis()} [service] onCreate pid=${android.os.Process.myPid()}\n")
+    }
+
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
-        // filterKeyEvents 已在 XML 里静态声明（accessibilityFlags），无需运行时 setServiceInfo。
-        // 启动标记：验证按键日志写入路径是否可用
+        AppLog.write(this, "events.log", "${System.currentTimeMillis()} [service] onServiceConnected")
+        // filterKeyEvents 改为运行时启用（对齐参考应用 Gamepad Mouse 的 XML：不静态声明
+        // accessibilityFlags=flagRequestFilterKeyEvents）。静态全局按键拦截标记会被
+        // MagicOS 视为高危服务，与"注入时高频焦点振荡"叠加触发 AppEyeFocusWindow 强停。
+        // flags=98 完全对齐参考应用（同设备从未被 ZRHungService 强停）：
+        //   FLAG_INCLUDE_NOT_IMPORTANT_VIEWS(0x2) | FLAG_REQUEST_FILTER_KEY_EVENTS(0x20)
+        //   | FLAG_REQUEST_TOUCH_EXPLORATION_MODE(0x40)
+        // 0x40 让本服务进入"触摸探索类（读屏类）"服务分类——荣耀探针对该分类有豁免。
         try {
-            java.io.FileOutputStream(java.io.File(filesDir, "keys.log"), true).use {
-                it.write("${System.currentTimeMillis()} service connected\n".toByteArray())
-            }
-        } catch (_: Throwable) {
+            val info = serviceInfo ?: AccessibilityServiceInfo()
+            info.flags = 98
+            setServiceInfo(info)
+            AppLog.write(this, "events.log",
+                "${System.currentTimeMillis()} [service] setServiceInfo flags=0x${info.flags.toString(16)}")
+        } catch (t: Throwable) {
+            AppLog.write(this, "events.log",
+                "${System.currentTimeMillis()} [service] setServiceInfo failed: ${t.javaClass.simpleName}: ${t.message}")
         }
+        AppLog.write(this, "keys.log", "${System.currentTimeMillis()} service connected")
         // 无障碍服务启动后自动拉起悬浮控制台（无障碍窗口类型，无需悬浮窗权限）
         if (OverlayController.instance == null) {
             OverlayController(this).show()
@@ -81,14 +100,13 @@ class GestureAccessibilityService : AccessibilityService() {
         return c.onGamepadKey(event.keyCode, event.action != KeyEvent.ACTION_UP, event)
     }
 
-    /** 按键事件落盘（荣耀 logcat 加密，用于诊断按键是否到达服务） */
+    /** 按键事件落盘（诊断按键是否到达服务；后台线程写入，不拖慢主线程） */
     private fun logKeyEvent(event: KeyEvent) {
         try {
             val line = "${System.currentTimeMillis()} code=${event.keyCode} " +
                 "name=${ConfigStore.keyNameOf(event.keyCode) ?: "?"} " +
-                "src=${event.source} act=${event.action}\n"
-            java.io.FileOutputStream(java.io.File(filesDir, "keys.log"), true)
-                .use { it.write(line.toByteArray()) }
+                "src=${event.source} act=${event.action}"
+            AppLog.write(this, "keys.log", line)
         } catch (_: Throwable) {
         }
     }
@@ -96,9 +114,8 @@ class GestureAccessibilityService : AccessibilityService() {
     /** 手势注入/系统动作落盘：用于诊断看门狗强杀与注入行为的时序关联 */
     private fun logGesture(tag: String, detail: String) {
         try {
-            val line = "${System.currentTimeMillis()} [$tag] $detail\n"
-            java.io.FileOutputStream(java.io.File(filesDir, "gestures.log"), true)
-                .use { it.write(line.toByteArray()) }
+            val line = "${System.currentTimeMillis()} [$tag] $detail"
+            AppLog.write(this, "gestures.log", line)
         } catch (_: Throwable) {
         }
     }
@@ -108,7 +125,15 @@ class GestureAccessibilityService : AccessibilityService() {
         OverlayController.instance?.onConfigurationChanged()
     }
 
+    override fun onUnbind(intent: Intent?): Boolean {
+        AppLog.writeSync(this, "events.log",
+            "${System.currentTimeMillis()} [service] onUnbind intent=${intent?.action}\n")
+        return super.onUnbind(intent)
+    }
+
     override fun onDestroy() {
+        AppLog.writeSync(this, "events.log",
+            "${System.currentTimeMillis()} [service] onDestroy\n")
         OverlayController.instance?.hide()
         instance = null
         super.onDestroy()

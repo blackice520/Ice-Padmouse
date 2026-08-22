@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- filterKeyEvents 用 XML 静态声明（MagicOS 忽略运行时 setServiceInfo 的该 flag），
-     用于鼠标休眠时全局响应 L3 唤出。强停根因是"焦点窗聚焦抢焦点"，与 filterKeyEvents 无关。 -->
+<!-- 对齐参考应用 Gamepad Mouse（同设备从未被 ZRHungService 强停）：
+     不静态声明 accessibilityFlags=flagRequestFilterKeyEvents。
+     该 flag 在 GestureAccessibilityService.onServiceConnected 里用运行时
+     setServiceInfo 启用；静态全局按键拦截标记会被 MagicOS 判定为高危服务。
+     其余字段与参考应用一致（typeAllMask / feedbackGeneric / canRetrieveWindowContent / canPerformGestures）。 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeAllMask"
     android:accessibilityFeedbackType="feedbackGeneric"
-    android:accessibilityFlags="flagDefault|flagRequestFilterKeyEvents"
     android:canPerformGestures="true"
     android:canRequestFilterKeyEvents="true"
     android:canRetrieveWindowContent="true"
