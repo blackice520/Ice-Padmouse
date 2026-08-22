@@ -355,7 +355,11 @@ class OverlayController(private val service: GestureAccessibilityService) {
                     logEvent("media", "playPause via transportControls")
                     return
                 }
-                logEvent("media", "no active session, fallback media key")
+                // 已授权但无活跃会话：双击屏幕中央兜底，绝不落回媒体键
+                // （媒体键派发是手柄断联元凶——实测"第一次按Y断联"正是无会话时落回媒体键）
+                GestureAccessibilityService.instance?.doubleTap(screenW / 2f, screenH / 2f)
+                logEvent("media", "no session, fallback doubleTap (media key skipped)")
+                return
             }
             // 回退 1：媒体键派发
             val am = ctx.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
