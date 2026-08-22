@@ -1,18 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">JoyMouse 手柄鼠标</string>
-    <string name="accessibility_service_label">JoyMouse 手势模拟服务</string>
+    <string name="app_name">Ice Padmouse</string>
+    <string name="accessibility_service_label">Ice Padmouse 手势模拟服务</string>
     <string name="accessibility_service_desc">用于在屏幕上模拟触摸手势（点击、双击、长按、拖拽、滑动、滚动），配合悬浮控制台与蓝牙/USB 手柄把按键映射为鼠标操作。本服务不读取屏幕内容，仅在您操作时注入手势。</string>
 
     <string name="virtual_title">虚拟按键</string>
     <string name="virtual_subtitle">手柄图例：每个按键显示当前功能，点按即可修改映射</string>
-    <string name="title_main">JoyMouse 手柄鼠标映射</string>
+    <string name="title_main">Ice Padmouse 手柄鼠标映射</string>
     <string name="subtitle_main">在手机上模拟电脑鼠标：虚拟摇杆移动光标，物理手柄摇杆/按键映射鼠标，自定义按键实现点击 / 拖拽 / 滑动 / 系统操作</string>
     <string name="card_access">无障碍服务（手势模拟，唯一必需权限）</string>
     <string name="access_note">光标与悬浮窗使用无障碍专用窗口（TYPE_ACCESSIBILITY_OVERLAY），无需申请「显示在其他应用上层」权限。</string>
     <string name="card_battery">电池优化白名单（防"消失"）</string>
     <string name="btn_battery">去设置</string>
-    <string name="battery_hint">荣耀等系统会定期清理后台无障碍服务，导致应用运行一会儿就"消失"且服务被吊销。加入白名单可避免。另建议：设置→应用→应用启动管理→JoyMouse→手动管理→允许自启动/后台活动。</string>
+    <string name="battery_hint">荣耀等系统会定期清理后台无障碍服务，导致应用运行一会儿就"消失"且服务被吊销。加入白名单可避免。另建议：设置→应用→应用启动管理→Ice Padmouse→手动管理→允许自启动/后台活动。</string>
     <string name="card_console">悬浮控制台</string>
     <string name="btn_access">去开启</string>
     <string name="btn_edit_layout">编辑按键布局</string>

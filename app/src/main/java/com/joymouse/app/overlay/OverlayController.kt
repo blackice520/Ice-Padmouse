@@ -545,7 +545,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(20))
             setOnTouchListener { _, e -> onPanelGrab(e) }
             addView(TextView(ctx).apply {
-                text = "≡ JoyMouse"
+                text = "≡ Ice Padmouse"
                 setTextColor(Color.argb(190, 255, 255, 255))
                 textSize = 10f
             })
