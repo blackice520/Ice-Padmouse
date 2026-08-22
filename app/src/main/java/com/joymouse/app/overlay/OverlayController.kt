@@ -1350,7 +1350,24 @@ class OverlayController(private val service: GestureAccessibilityService) {
         // 1000ms 冷却：全局动作（主页/返回/最近任务/截屏）频繁调用是看门狗高危触发点
         if (now - lastGlobalActionTime < 1000) return
         lastGlobalActionTime = now
+        // BACK/NOTIFICATIONS/QUICK_SETTINGS 在 MagicOS 上以"注入按键事件"实现，
+        // 注入的键会路由到当前持有焦点的窗口——正是我们的 15×15 焦点窗，被自己
+        // 吞掉后应用收不到。因此动作前临时让出焦点、动作后 400ms 取回（单次低频，
+        // 与滚动式高频振荡完全不同）。HOME/RECENTS/SCREENSHOT 走 WMS/SystemUI
+        // 通道，不受焦点影响，无需处理。
+        val needsFocusRelease = action == Action.BACK ||
+            action == Action.NOTIFICATIONS || action == Action.QUICK_SETTINGS
+        val restore = needsFocusRelease && focusHeld && mouseActive && !config.gameMode
+        if (restore) {
+            logEvent("global", "${action.id} focus released before")
+            applyFocusViewFocusable(false)
+        }
         GestureAccessibilityService.instance?.performGlobal(action)
+        if (restore) {
+            tickHandler.postDelayed({
+                if (mouseActive && focusHeld && !config.gameMode) applyFocusViewFocusable(true)
+            }, 400)
+        }
     }
 
     /** 左键按下：不立即派发，等 tick 决定点击/拖拽。按下点取光标当前位置 */

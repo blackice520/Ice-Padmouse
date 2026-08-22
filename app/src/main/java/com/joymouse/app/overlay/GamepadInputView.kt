@@ -1,12 +1,14 @@
 package com.joymouse.app.overlay
 
 import android.content.Context
+import android.view.InputDevice
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import com.joymouse.app.AppLog
 
 /**
- * 手柄输入捕获视图：以 1×1 可聚焦的无障碍悬浮窗挂在屏幕左上角 (0,0)。
+ * 手柄输入捕获视图：以 15×15 可聚焦的无障碍悬浮窗挂在屏幕左上角 (0,0)。
  * 当鼠标激活时该窗口持有输入焦点，蓝牙/USB 手柄的按键与摇杆轴事件
  * 都会被路由到这里（免 root 捕获模拟摇杆的唯一途径，参考 同类手柄应用 方案）。
  *
@@ -14,15 +16,18 @@ import android.view.View
  */
 class GamepadInputView(context: Context, private val controller: OverlayController) : View(context) {
 
-    /** 手柄/键盘/方向键/摇杆来源位掩码（与同类应用一致） */
+    /** 手柄/键盘/方向键/摇杆来源位掩码（与同类应用一致，另含 DPAD：
+     *  部分手柄十字键事件 source=SOURCE_DPAD，不识别会丢键） */
     private fun isGamepadSource(event: MotionEvent): Boolean {
         val src = event.source
-        return (src and 16777232) == 16777232 || (src and 1025) == 1025
+        return (src and 16777232) == 16777232 || (src and 1025) == 1025 ||
+            (src and InputDevice.SOURCE_DPAD) == InputDevice.SOURCE_DPAD
     }
 
     private fun isGamepadSource(event: KeyEvent): Boolean {
         val src = event.source
-        return (src and 16777232) == 16777232 || (src and 1025) == 1025
+        return (src and 16777232) == 16777232 || (src and 1025) == 1025 ||
+            (src and InputDevice.SOURCE_DPAD) == InputDevice.SOURCE_DPAD
     }
 
     override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
@@ -39,6 +44,9 @@ class GamepadInputView(context: Context, private val controller: OverlayControll
     /** 按键主通道（焦点窗路径，本设备实测可靠）：
      *  映射到的键消费；未映射/未激活时的非唤出键返回 false，事件回落给应用。 */
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        // 原始事件落盘：确认十字键等事件是否到达焦点窗、来源类型是什么
+        AppLog.write(context, "keys.log",
+            "${System.currentTimeMillis()} [view-raw] code=$keyCode src=${event.source} act=${event.action}")
         if (isGamepadSource(event) && controller.onGamepadKey(keyCode, true, event)) return true
         return super.onKeyDown(keyCode, event)
     }

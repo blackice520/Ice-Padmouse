@@ -82,7 +82,8 @@ class GestureAccessibilityService : AccessibilityService() {
         val c = OverlayController.instance
         if (c == null) return super.onKeyEvent(event)
         val src = event.source
-        val isGamepad = (src and 1025) == 1025 || (src and 16777232) == 16777232
+        val isGamepad = (src and 1025) == 1025 || (src and 16777232) == 16777232 ||
+            (src and android.view.InputDevice.SOURCE_DPAD) == android.view.InputDevice.SOURCE_DPAD
         if (!isGamepad) return super.onKeyEvent(event)
         val name = ConfigStore.keyNameOf(event.keyCode) ?: return super.onKeyEvent(event)
         // 游戏模式：所有手柄按键直接交给控制器做点位映射，与鼠标激活状态无关、绝不抢焦点
