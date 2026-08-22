@@ -319,10 +319,39 @@ class OverlayController(private val service: GestureAccessibilityService) {
         scheduleCursorHide()
     }
 
-    /** 播放/暂停：优先派发系统媒体键（无需权限、走系统媒体会话栈）；
-     *  派发失败时回退为双击屏幕中央（视频 App 的中央暂停区）。 */
+    /** 播放/暂停：
+     *  1) 已授权通知使用权 → 直接经媒体会话 transportControls 控制（不触碰蓝牙/AVRCP，
+     *     根治"重启后第一次按 Y 手柄断联"的竞态）；
+     *  2) 未授权或无会话 → 回退媒体键派发（已知副作用：应用重启后首次派发可能断联）；
+     *  3) 最后回退双击屏幕中央。 */
     fun toggleMediaPlayPause() {
         try {
+            val cn = android.content.ComponentName(
+                ctx, com.joymouse.app.service.MediaNotificationListener::class.java
+            )
+            val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
+            val listenerGranted = nm?.isNotificationListenerAccessGranted(cn) == true
+            if (listenerGranted) {
+                val msm = ctx.getSystemService(Context.MEDIA_SESSION_SERVICE) as? android.media.session.MediaSessionManager
+                if (msm != null) {
+                    val sessions = msm.getActiveSessions(null)
+                    val playing = sessions.firstOrNull {
+                        it.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
+                    }
+                    val session = playing ?: sessions.firstOrNull {
+                        it.playbackState?.state?.let { s ->
+                            s != android.media.session.PlaybackState.STATE_NONE
+                        } == true
+                    }
+                    if (session != null) {
+                        val isPlaying = session.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
+                        if (isPlaying) session.transportControls.pause() else session.transportControls.play()
+                        logEvent("media", "playPause via transportControls")
+                        return
+                    }
+                }
+            }
+            // 回退 1：媒体键派发
             val am = ctx.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
             if (am != null) {
                 val down = KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
@@ -332,7 +361,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
                 logEvent("media", "playPause via dispatchMediaKeyEvent")
                 return
             }
-            // 兜底：双击屏幕中央
+            // 回退 2：双击屏幕中央
             GestureAccessibilityService.instance?.doubleTap(screenW / 2f, screenH / 2f)
             logEvent("media", "playPause fallback doubleTap")
         } catch (t: Throwable) {
@@ -1117,9 +1146,10 @@ class OverlayController(private val service: GestureAccessibilityService) {
         val actionId = cfg.gamepadMap[name] ?: return false
         val action = Action.fromId(actionId)
         if (down && (event == null || event.repeatCount == 0)) {
-            // 消抖：双通道可能重复送达同一按键，250ms 内同动作只执行一次
+            // 消抖仅针对真实 KeyEvent 双通道重复（焦点窗+服务）；HAT 轴翻译的
+            // 十字键（event==null）是单通道，消抖会吞掉连续快速按音量
             val now = System.currentTimeMillis()
-            if (now - lastKeyActionTime < 250 && lastKeyAction == action) return true
+            if (event != null && now - lastKeyActionTime < 250 && lastKeyAction == action) return true
             lastKeyActionTime = now
             lastKeyAction = action
             if (action == Action.NOOP) return true
@@ -1377,8 +1407,11 @@ class OverlayController(private val service: GestureAccessibilityService) {
 
     fun performGlobalThrottled(action: Action) {
         val now = System.currentTimeMillis()
-        // 1000ms 冷却：全局动作（主页/返回/最近任务/截屏）频繁调用是看门狗高危触发点
-        if (now - lastGlobalActionTime < 1000) return
+        // 音量是纯 AudioManager 调用（无按键注入），连按不该被限流——
+        // 否则连续按音量键只有第一下生效，操作不流畅
+        val isAudio = action == Action.VOLUME_UP || action == Action.VOLUME_DOWN
+        // 1000ms 冷却：其余全局动作（主页/返回/最近任务/截屏）频繁调用是看门狗高危触发点
+        if (!isAudio && now - lastGlobalActionTime < 1000) return
         lastGlobalActionTime = now
         // BACK/NOTIFICATIONS/QUICK_SETTINGS 在 MagicOS 上以"注入按键事件"实现，
         // 注入的键路由到当前焦点窗——正是我们的 15×15 捕获窗，被自己吞掉。
