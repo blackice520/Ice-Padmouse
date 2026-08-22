@@ -108,6 +108,7 @@ data class AppConfig(
     var focusIdleRelease: Boolean = false, // 空闲 2 分钟让出窗口焦点（游戏友好）。默认关=鼠标激活期间始终持有焦点
     var gameMode: Boolean = false,     // 游戏模式：完全不使用焦点窗（游戏全程保持焦点），按键→屏幕点位直连
     var gameSwipeDistance: Int = 180,  // 游戏模式滑动距离（dp，80..400）
+    var gamePointOpacity: Int = 80,    // 游戏模式点位标记透明度（20..100%）
     var gameKeyMap: MutableMap<String, String> = mutableMapOf(), // 游戏模式：手柄键名 -> 绑定串
     var gamePoints: MutableList<GamePoint> = mutableListOf(),    // 游戏模式点位
     var gamepadMap: MutableMap<String, String> = mutableMapOf(), // 手柄键名 -> 动作 id
@@ -165,6 +166,7 @@ data class AppConfig(
             .put("focusIdleRelease", focusIdleRelease)
             .put("gameMode", gameMode)
             .put("gameSwipeDistance", gameSwipeDistance)
+            .put("gamePointOpacity", gamePointOpacity)
             .put("gameKeyMap", gkm)
             .put("gamePoints", gps)
             .put("gamepadMap", gm)
@@ -201,6 +203,7 @@ data class AppConfig(
                 cfg.focusIdleRelease = o.optBoolean("focusIdleRelease", false)
                 cfg.gameMode = o.optBoolean("gameMode", false)
                 cfg.gameSwipeDistance = o.optInt("gameSwipeDistance", 180).coerceIn(80, 400)
+                cfg.gamePointOpacity = o.optInt("gamePointOpacity", 80).coerceIn(20, 100)
                 val gkm = o.optJSONObject("gameKeyMap")
                 if (gkm != null) {
                     val it = gkm.keys()

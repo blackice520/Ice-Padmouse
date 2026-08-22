@@ -17,14 +17,13 @@ class GamePointView(context: Context, val point: GamePoint, private val controll
     View(context) {
 
     private val density = resources.displayMetrics.density
-    private var downX = 0f
-    private var downY = 0f
+    private var downRawX = 0f
+    private var downRawY = 0f
     private var downPtX = 0f
     private var downPtY = 0f
     private var pointerId = -1
 
     private val fillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = Color.argb(200, 255, 87, 34) // deep orange
         style = Paint.Style.FILL
     }
     private val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -40,6 +39,9 @@ class GamePointView(context: Context, val point: GamePoint, private val controll
 
     override fun onDraw(canvas: Canvas) {
         val r = width / 2f
+        // 透明度由配置控制（默认 80%）
+        val alpha = (255 * controller.gamePointOpacity() / 100).coerceIn(51, 255)
+        fillPaint.color = Color.argb(alpha, 255, 87, 34)
         canvas.drawCircle(r, r, r - 1f * density, fillPaint)
         canvas.drawCircle(r, r, r - 1f * density, borderPaint)
         val baseline = r - (textPaint.descent() + textPaint.ascent()) / 2
@@ -50,8 +52,10 @@ class GamePointView(context: Context, val point: GamePoint, private val controll
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 pointerId = e.getPointerId(0)
-                downX = e.x
-                downY = e.y
+                // 用屏幕坐标 rawX/rawY：移动窗口会改变局部坐标映射，
+                // 局部坐标算位移会形成"位置振荡"（拖动时不停晃动）
+                downRawX = e.rawX
+                downRawY = e.rawY
                 downPtX = point.x
                 downPtY = point.y
                 controller.onOurTouch(true)
@@ -59,9 +63,9 @@ class GamePointView(context: Context, val point: GamePoint, private val controll
             MotionEvent.ACTION_MOVE -> {
                 val idx = e.findPointerIndex(pointerId)
                 if (idx >= 0) {
-                    val dx = e.getX(idx) - downX
-                    val dy = e.getY(idx) - downY
-                    if (hypot(dx, dy) > 4f * density) {
+                    val dx = e.rawX - downRawX
+                    val dy = e.rawY - downRawY
+                    if (kotlin.math.hypot(dx, dy) > 4f * density) {
                         point.x = (downPtX * controller.screenW + dx).coerceIn(0f, controller.screenW.toFloat()) / controller.screenW
                         point.y = (downPtY * controller.screenH + dy).coerceIn(0f, controller.screenH.toFloat()) / controller.screenH
                         controller.refreshGamePoint(this)

@@ -427,6 +427,31 @@ class MainActivity : AppCompatActivity() {
         })
         container.addView(distRow)
 
+        // 标记透明度
+        container.addView(text("点位标记透明度", 13f, 0xFF333333.toInt(), true))
+        val sbOp = SeekBar(this)
+        sbOp.max = 80 // 20..100 %
+        sbOp.progress = cfg.gamePointOpacity - 20
+        val tvOp = TextView(this).apply { text = "${cfg.gamePointOpacity}%"; textSize = 13f }
+        val opRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+        }
+        sbOp.layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        opRow.addView(sbOp)
+        opRow.addView(tvOp)
+        sbOp.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(sb: SeekBar?, p: Int, fromUser: Boolean) {
+                cfg.gamePointOpacity = p + 20
+                tvOp.text = "${cfg.gamePointOpacity}%"
+                ConfigStore.save(this@MainActivity, cfg)
+                OverlayController.instance?.gamePointViews?.values?.forEach { it.invalidate() }
+            }
+            override fun onStartTrackingTouch(sb: SeekBar?) {}
+            override fun onStopTrackingTouch(sb: SeekBar?) {}
+        })
+        container.addView(opRow)
+
         // 点位管理
         container.addView(text("屏幕点位（按键点击/滑动的目标位置）", 13f, 0xFF333333.toInt(), true))
         container.addView(row(

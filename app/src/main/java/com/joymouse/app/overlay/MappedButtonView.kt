@@ -68,8 +68,9 @@ class MappedButtonView(context: Context, val btn: MappedButton, private val cont
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 pointerId = e.getPointerId(0)
-                downX = e.x
-                downY = e.y
+                // 屏幕坐标：局部坐标会随窗口移动而变化，导致拖动位置振荡
+                downX = e.rawX
+                downY = e.rawY
                 downBtnX = btn.x
                 downBtnY = btn.y
                 moved = false
@@ -80,8 +81,8 @@ class MappedButtonView(context: Context, val btn: MappedButton, private val cont
             MotionEvent.ACTION_MOVE -> {
                 val idx = e.findPointerIndex(pointerId)
                 if (idx >= 0) {
-                    val dx = e.getX(idx) - downX
-                    val dy = e.getY(idx) - downY
+                    val dx = e.rawX - downX
+                    val dy = e.rawY - downY
                     if (hypot(dx, dy) > 6f * density) moved = true
                     if (editing && moved) controller.onEditButtonMoved(this, dx, dy)
                 }

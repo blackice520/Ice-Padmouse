@@ -482,6 +482,9 @@ class OverlayController(private val service: GestureAccessibilityService) {
     /** 游戏模式是否开启（供服务按键路由判断） */
     fun gameMode(): Boolean = config.gameMode
 
+    /** 点位标记透明度 20..100（供 GamePointView 绘制） */
+    fun gamePointOpacity(): Int = config.gamePointOpacity
+
     fun applyPanelOpacity() {
         val p = panel ?: return
         val pp = panelParams ?: return
