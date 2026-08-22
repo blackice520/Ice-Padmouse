@@ -876,6 +876,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
             Action.MEDIA_REWIND -> s.doubleTap(screenW * 0.2f, cursorY)
             Action.TOGGLE_MOUSE -> toggleMouse()
             Action.TOGGLE_PANEL -> togglePanel()
+            Action.TOGGLE_GAME_MODE -> setGameMode(!config.gameMode)
             else -> performGlobalThrottled(action)
         }
     }
@@ -1109,6 +1110,21 @@ class OverlayController(private val service: GestureAccessibilityService) {
             hatDir = dir
             if (dir != 0) onGamepadKey(hatKeyCode(dir), true, null)
         }
+        // 扳机轴（L2=AXIS_LTRIGGER / R2=AXIS_RTRIGGER）→ 数字键翻译：
+        // Xbox 等手柄的扳机只上报模拟轴、不产生 BUTTON_L2/BUTTON_R2 按键事件，
+        // 用阈值边沿检测把它翻译成 lt/rt 键，供映射（如 L2=游戏模式开关、R2=截屏）使用。
+        val lt = event.getAxisValue(MotionEvent.AXIS_LTRIGGER)
+        val ltDown = lt > 0.5f
+        if (ltDown != ltTriggerDown) {
+            ltTriggerDown = ltDown
+            onGamepadKey(KeyEvent.KEYCODE_BUTTON_L2, ltDown, null)
+        }
+        val rt = event.getAxisValue(MotionEvent.AXIS_RTRIGGER)
+        val rtDown = rt > 0.5f
+        if (rtDown != rtTriggerDown) {
+            rtTriggerDown = rtDown
+            onGamepadKey(KeyEvent.KEYCODE_BUTTON_R2, rtDown, null)
+        }
         lastMotionTime = System.currentTimeMillis()
         lastActivity = lastMotionTime
         return true
@@ -1116,6 +1132,10 @@ class OverlayController(private val service: GestureAccessibilityService) {
 
     /** 十字键 HAT 方向 → KeyEvent keyCode（1上 2下 3左 4右） */
     private var hatDir = 0
+
+    /** 扳机模拟轴 → 数字键翻译的当前状态 */
+    private var ltTriggerDown = false
+    private var rtTriggerDown = false
 
     private fun hatKeyCode(dir: Int): Int = when (dir) {
         1 -> KeyEvent.KEYCODE_DPAD_UP
@@ -1129,6 +1149,14 @@ class OverlayController(private val service: GestureAccessibilityService) {
         val name = ConfigStore.keyNameOf(keyCode) ?: return false
         logKeyEvent(keyCode, name, down, "onGamepadKey")
         val cfg = config
+        // 游戏模式开关键（映射为 toggle_game_mode，如 L2 扳机）：任何状态下都切换（仅在按下瞬间）
+        if (cfg.gamepadMap[name] == Action.TOGGLE_GAME_MODE.id) {
+            if (down && (event == null || event.repeatCount == 0)) {
+                setGameMode(!cfg.gameMode)
+                haptic()
+            }
+            return true
+        }
         // 游戏模式：按键→点位直连，全程不依赖焦点窗
         if (cfg.gameMode) {
             return onGameModeKey(name, down, event)
@@ -1174,6 +1202,39 @@ class OverlayController(private val service: GestureAccessibilityService) {
 
     // ================= 游戏模式（不使用焦点窗） =================
 
+    /** 浮层提示（游戏模式开关状态）。用无障碍浮层而非 Toast：Toast 在后台/游戏中可能被系统吞掉。 */
+    private var gameModeToast: TextView? = null
+    private val toastHandler = Handler(Looper.getMainLooper())
+
+    private fun showGameModeToast(text: String) {
+        gameModeToast?.let { runCatching { wm.removeView(it) } }
+        gameModeToast = null
+        toastHandler.removeCallbacksAndMessages(null)
+        val v = TextView(ctx).apply {
+            this.text = text
+            textSize = 15f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            background = roundedDrawable(Color.argb(215, 20, 20, 20), 20f)
+            setPadding(dp(24), dp(12), dp(24), dp(12))
+        }
+        val p = baseParams(WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT).apply {
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            y = dp(100)
+            flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        }
+        try {
+            wm.addView(v, p)
+            gameModeToast = v
+            toastHandler.postDelayed({
+                gameModeToast?.let { runCatching { wm.removeView(it) } }
+                gameModeToast = null
+            }, 1500)
+        } catch (t: Throwable) {
+            t.printStackTrace()
+        }
+    }
+
     /** 游戏模式开关（状态唯一入口：由本方法统一变更并落盘）。
      *  开启后：立即让出焦点、隐藏光标，之后所有按键走点位直连映射。
      *  关闭时：同步取消"显示点位标记"，标记立即隐藏。 */
@@ -1186,6 +1247,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
         }
         cfg.gameMode = on
         logEvent("gameMode", if (on) "ON" else "OFF")
+        showGameModeToast(if (on) "游戏模式已开启" else "游戏模式已关闭")
         if (on) {
             focusHeld = false
             applyFocusViewFocusable(false) // 让出焦点，游戏全程保持

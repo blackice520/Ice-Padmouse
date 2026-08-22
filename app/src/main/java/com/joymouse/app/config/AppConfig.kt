@@ -29,6 +29,7 @@ enum class Action(val id: String, val label: String, val isGlobal: Boolean = fal
     MEDIA_REWIND("media_rewind", "快退（双击屏左 20% 处）"),
     TOGGLE_MOUSE("toggle_mouse", "显示/隐藏鼠标"),
     TOGGLE_PANEL("toggle_panel", "显示/隐藏控制台"),
+    TOGGLE_GAME_MODE("toggle_game_mode", "游戏模式开关"),
     NOOP("noop", "无动作");
 
     companion object {
@@ -61,6 +62,7 @@ fun Action.shortLabel(): String = when (this) {
     Action.MEDIA_REWIND -> "快退"
     Action.TOGGLE_MOUSE -> "鼠标"
     Action.TOGGLE_PANEL -> "面板"
+    Action.TOGGLE_GAME_MODE -> "游戏模式"
     Action.NOOP -> "无"
 }
 
@@ -104,7 +106,7 @@ data class AppConfig(
     var vibrationIntensity: Int = 255, // 振动强度 0..255
     var toggleKey: String = "l3",      // 唤出/关闭鼠标的手柄键
     var buttonsVisible: Boolean = true,// 自定义按键是否显示
-    var mappingVersion: Int = 2,       // 默认映射版本（用于升级迁移）
+    var mappingVersion: Int = 4,       // 默认映射版本（用于升级迁移）
     var focusIdleRelease: Boolean = false, // 空闲 2 分钟让出窗口焦点（游戏友好）。默认关=鼠标激活期间始终持有焦点
     var gameMode: Boolean = false,     // 游戏模式：完全不使用焦点窗（游戏全程保持焦点），按键→屏幕点位直连
     var gameSwipeDistance: Int = 180,  // 游戏模式滑动距离（dp，80..400）
@@ -280,6 +282,21 @@ object ConfigStore {
             cfg.gamepadMap["y"] = "media_play_pause"
             cfg.mappingVersion = 2
         }
+        // v3 迁移：L2（左扳机）默认改为"游戏模式开关"（仅当用户未自定义时）
+        if (cfg.mappingVersion < 3) {
+            if (cfg.gamepadMap["lt"].isNullOrBlank() || cfg.gamepadMap["lt"] == "noop") {
+                cfg.gamepadMap["lt"] = "toggle_game_mode"
+            }
+            cfg.mappingVersion = 3
+        }
+        // v4 迁移：R1（数字键，任何状态可收到）默认改为"游戏模式开关"。
+        // L2 是模拟轴、游戏模式下读不到，R1 作为可靠开关兜底。
+        if (cfg.mappingVersion < 4) {
+            if (cfg.gamepadMap["rb"].isNullOrBlank() || cfg.gamepadMap["rb"] == "noop") {
+                cfg.gamepadMap["rb"] = "toggle_game_mode"
+            }
+            cfg.mappingVersion = 4
+        }
         cached = cfg
         return cfg
     }
@@ -308,8 +325,8 @@ object ConfigStore {
         "x" to "toggle_mouse",
         "y" to "media_play_pause",
         "lb" to "mute",
-        "rb" to "noop",
-        "lt" to "noop",
+        "rb" to "toggle_game_mode",
+        "lt" to "toggle_game_mode",
         "rt" to "screenshot",
         "up" to "vol_up",
         "down" to "vol_down",

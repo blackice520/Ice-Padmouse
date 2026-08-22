@@ -17,7 +17,7 @@
     <string name="btn_access">去开启</string>
     <string name="btn_edit_layout">编辑按键布局</string>
     <string name="card_gamepad">物理手柄（蓝牙 / OTG，免 root）</string>
-    <string name="gamepad_help">连上手柄后，按 L3（左摇杆按下）唤出/关闭鼠标。默认按键映射：A=单击，B=返回，X=唤出/隐藏光标，Y=播放/暂停，L1=静音，R2=截屏，十字键=音量/快进快退，Select=主页，Start=最近任务。左摇杆=移动光标，右摇杆=滚动。手指触摸屏幕会自动收起鼠标（触摸正常生效），按 L3/X 再次唤出。</string>
+    <string name="gamepad_help">连上手柄后，按 L3（左摇杆按下）唤出/关闭鼠标，按 R1（数字键，任何状态可用）或 L2（左扳机，需鼠标激活）打开/关闭游戏模式。默认按键映射：A=单击，B=返回，X=唤出/隐藏光标，Y=播放/暂停，L1=静音，R1=游戏模式开关，L2=游戏模式开关，R2=截屏，十字键=音量/快进快退，Select=主页，Start=最近任务。左摇杆=移动光标，右摇杆=滚动。手指触摸屏幕会自动收起鼠标（触摸正常生效），按 L3/X 再次唤出。</string>
     <string name="card_gamepad_map">手柄按键映射</string>
     <string name="gamepad_map_hint">点击任意按键可修改其动作；顶部第一行可修改「唤出/关闭鼠标」的键。</string>
     <string name="label_swap_ab">交换 A/B 键（A=单击 ↔ B=长按）</string>

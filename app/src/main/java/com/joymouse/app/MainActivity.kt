@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
 import android.view.View
@@ -34,6 +36,17 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvGamepadSpeedValue: TextView
     private lateinit var tvStyleValue: TextView
     private lateinit var diagram: GamepadDiagramView
+
+    /** 游戏模式开关：外部（手柄 L2 等）切换时同步刷新其选中态 */
+    private var gameModeSwitch: SwitchCompat? = null
+    private var updatingGameSwitch = false
+    private val gameSwitchRefresh = Handler(Looper.getMainLooper())
+    private val gameSwitchRunnable = object : Runnable {
+        override fun run() {
+            refreshGameModeSwitch()
+            gameSwitchRefresh.postDelayed(this, 1000)
+        }
+    }
 
     private val cursorStyles = listOf(
         "orange" to "橙",
@@ -70,6 +83,11 @@ class MainActivity : AppCompatActivity() {
             pageMapping.visibility = if (item.itemId == R.id.nav_mapping) View.VISIBLE else View.GONE
             pageGame.visibility = if (item.itemId == R.id.nav_game) View.VISIBLE else View.GONE
             pageSettings.visibility = if (item.itemId == R.id.nav_settings) View.VISIBLE else View.GONE
+            // 切到对应页时重建，确保状态（如游戏模式开关）与控制器同步
+            when (item.itemId) {
+                R.id.nav_mapping -> buildGamepadMapUi()
+                R.id.nav_game -> buildGameUi()
+            }
             true
         }
 
@@ -207,6 +225,23 @@ class MainActivity : AppCompatActivity() {
         refreshStatus()
         diagram.refresh()
         buildGameUi()
+        gameSwitchRefresh.postDelayed(gameSwitchRunnable, 1000)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        gameSwitchRefresh.removeCallbacks(gameSwitchRunnable)
+    }
+
+    /** 同步游戏模式开关的选中态（外部经手柄切换时 UI 不会自动刷新） */
+    private fun refreshGameModeSwitch() {
+        val sw = gameModeSwitch ?: return
+        val on = ConfigStore.load(this).gameMode
+        if (sw.isChecked != on) {
+            updatingGameSwitch = true
+            sw.isChecked = on
+            updatingGameSwitch = false
+        }
     }
 
     private fun refreshStatus() {
@@ -409,8 +444,11 @@ class MainActivity : AppCompatActivity() {
 
         // 开关：游戏模式（状态由控制器统一管理并落盘，这里只转发）
         val sw = SwitchCompat(this)
+        updatingGameSwitch = true
         sw.isChecked = cfg.gameMode
+        updatingGameSwitch = false
         sw.setOnCheckedChangeListener { _, on ->
+            if (updatingGameSwitch) return@setOnCheckedChangeListener
             val c = OverlayController.instance
             if (c != null) {
                 c.setGameMode(on)
@@ -420,6 +458,7 @@ class MainActivity : AppCompatActivity() {
             }
             buildGameUi()
         }
+        gameModeSwitch = sw
         container.addView(row(sw, "游戏模式（不使用焦点窗）"))
         container.addView(text("开启后游戏全程保持窗口焦点：物理摇杆不可用；手柄按键直接点击/滑动屏幕点位。", 12f))
 

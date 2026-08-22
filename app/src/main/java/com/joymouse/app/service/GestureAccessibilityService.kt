@@ -91,12 +91,16 @@ class GestureAccessibilityService : AccessibilityService() {
             return c.onGamepadKey(event.keyCode, event.action != KeyEvent.ACTION_UP, event)
         }
         if (!c.mouseActive) {
-            // 未激活：响应用户配置的唤出键（L3 等），以及任何映射为"唤出/隐藏光标"的键（如 X）
+            // 未激活：响应用户配置的唤出键（L3 等）、映射为"唤出/隐藏光标"的键（如 X），
+            // 以及"游戏模式开关"键（如 L2）——后者转发给控制器统一切换
             val cfg = ConfigStore.load(this)
             val isToggle = name == cfg.toggleKey || cfg.gamepadMap[name] == Action.TOGGLE_MOUSE.id
             if (isToggle && event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
                 c.toggleMouse()
                 return true
+            }
+            if (cfg.gamepadMap[name] == Action.TOGGLE_GAME_MODE.id) {
+                return c.onGamepadKey(event.keyCode, event.action != KeyEvent.ACTION_UP, event)
             }
             return super.onKeyEvent(event)
         }
