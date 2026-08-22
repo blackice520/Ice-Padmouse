@@ -6,12 +6,12 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
     <application
-        android:name=".JoyMouseApp"
+        android:name=".IcePadmouseApp"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.JoyMouse">
+        android:theme="@style/Theme.IcePadmouse">
 
         <activity
             android:name=".MainActivity"

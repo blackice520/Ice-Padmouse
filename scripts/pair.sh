@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# JoyMouse 无线配对脚本
+# Ice Padmouse 无线配对脚本
 # 用法: bash scripts/pair.sh
 # 注意: 先打开手机配对弹窗，再运行本脚本（配对码约 60 秒过期）
 set -e

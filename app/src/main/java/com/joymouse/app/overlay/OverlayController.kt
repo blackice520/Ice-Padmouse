@@ -804,7 +804,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
                         tickHandler.postDelayed(this, 220)
                     } else {
                         if (passthrough) tickHandler.postDelayed({ setPassthrough(false) }, 250)
-                        if (!ok) android.util.Log.w("JoyMouse", "注入手势失败(已重试1次)")
+                        if (!ok) android.util.Log.w("IcePadmouse", "注入手势失败(已重试1次)")
                     }
                 }
             }

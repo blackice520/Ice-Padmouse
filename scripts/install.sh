@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# JoyMouse 一键安装脚本（WSL 中运行）
+# Ice Padmouse 一键安装脚本（WSL 中运行）
 # 用法: bash scripts/install.sh
 set -e
 
@@ -23,5 +23,5 @@ echo ""
 echo "== 安装 APK =="
 adb install -r "$APK"
 echo ""
-echo "✅ 安装完成！在手机上打开 JoyMouse，开启无障碍服务后即可使用。"
+echo "✅ 安装完成！在手机上打开 Ice Padmouse，开启无障碍服务后即可使用。"
 echo "   查看实时日志:  adb logcat --pid=\$(adb shell pidof com.joymouse.app)"

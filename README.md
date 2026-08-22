@@ -1,4 +1,4 @@
-# JoyMouse 手柄鼠标映射（Android）· v2.1
+# Ice Padmouse 手柄鼠标映射（Android）· v2.1
 
 在手机上模拟电脑鼠标操作的免 root 手柄映射应用，另含**游戏模式**（不使用焦点窗、手游全程保持焦点）。独立实现，无第三方 SDK。
 
@@ -142,7 +142,7 @@ bash scripts/monitor.sh    # 常驻监控：logcat 抓取 + 强停瞬间全量�
 app/src/main/java/com/joymouse/app/
 ├── MainActivity.kt                  # 设置 + 手柄映射 + 游戏模式页
 ├── AppLog.kt                        # 后台异步日志（2MB 滚动截断）
-├── JoyMouseApp.kt                   # 全局崩溃落盘
+├── IcePadmouseApp.kt                # 全局崩溃落盘
 ├── config/AppConfig.kt              # 动作/按键/点位模型 + 配置持久化
 ├── service/GestureAccessibilityService.kt  # 手势注入 + 全局按键/动作
 └── overlay/

@@ -1,5 +1,5 @@
 #!/bin/bash
-# JoyMouse 监控 v2
+# Ice Padmouse 监控 v2
 # - 常驻 logcat 抓取到 logcat.log（本设备 logcat 可读，此前"荣耀 logcat 加密"结论有误）
 # - 每 15 秒采样：进程 PID / exit-info 强停计数 / ZRHung 强停次数 / 无障碍服务是否被吊销
 # - 检测到进程变化或强停时，落全量现场快照到 monitor.log
@@ -85,7 +85,7 @@ snapshot() {
   $ADB shell dumpsys input 2>/dev/null | grep -A4 'FocusedWindows' | head -6 >> "$OUT"
 }
 
-echo "===== JoyMouse monitor v2 start $(date '+%Y-%m-%d %H:%M:%S') =====" > "$OUT"
+echo "===== Ice Padmouse monitor v2 start $(date '+%Y-%m-%d %H:%M:%S') =====" > "$OUT"
 PREV_PID=$($ADB shell pidof "$PKG" 2>/dev/null | tr -d '\r\n')
 PREV_COUNT=$(force_stop_count)
 PREV_ZR=$(zrhung_count)

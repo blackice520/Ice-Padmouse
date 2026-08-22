@@ -1,4 +1,4 @@
-# JoyMouse 开发总结与经验（v1.0 迭代记录）
+# Ice Padmouse 开发总结与经验（v1.0 迭代记录）
 
 > 手柄鼠标映射 APK：无障碍手势注入 + 悬浮控制台 + 物理手柄映射，免 root。
 > 参考应用：Gamepad Mouse v1.3.0（已逆向分析，独立实现，未复制代码）。
@@ -52,7 +52,7 @@ OverlayController
 11. **窗口复用崩溃**：隐藏面板只移除不清理引用，重显示复用已移除窗口 → 彻底清空+全新重建。
 12. **配置迁移**：默认映射升级用 mappingVersion 机制，避免覆盖用户自定义。
 13. **闪退排查**：全局崩溃落盘 files/crash.log（荣耀 logcat 加密的替代方案）。
-14. **MagicOS 无障碍看门狗强停（真·闪退根因）**：`dumpsys activity exit-info` 显示 system_server 以 `reason=10 USER REQUESTED / subreason=21 FORCE STOP` 每 1~2 分钟强停前台服务。参考应用（gamepadmouse）也有强停记录，但都是 `iAwareF[SystemManagerSwipeUp]`（用户划掉）和 `iAwareF[LowMem]`（后台低内存回收）——是正常清理；JoyMouse 是 `state=empty` 无 iAware 标签的异常强停。根因是 XML 里静态声明 `accessibilityFlags=flagRequestFilterKeyEvents`（全局按键拦截）被看门狗判定高危。修复：XML 去掉静态 flag，改为运行时 `setServiceInfo(FLAG_REQUEST_FILTER_KEY_EVENTS)`（对齐参考应用）。
+14. **MagicOS 无障碍看门狗强停（真·闪退根因）**：`dumpsys activity exit-info` 显示 system_server 以 `reason=10 USER REQUESTED / subreason=21 FORCE STOP` 每 1~2 分钟强停前台服务。参考应用（gamepadmouse）也有强停记录，但都是 `iAwareF[SystemManagerSwipeUp]`（用户划掉）和 `iAwareF[LowMem]`（后台低内存回收）——是正常清理；Ice Padmouse 是 `state=empty` 无 iAware 标签的异常强停。根因是 XML 里静态声明 `accessibilityFlags=flagRequestFilterKeyEvents`（全局按键拦截）被看门狗判定高危。修复：XML 去掉静态 flag，改为运行时 `setServiceInfo(FLAG_REQUEST_FILTER_KEY_EVENTS)`（对齐参考应用）。
 15. **焦点窗常驻聚焦导致手指无法操作**：去掉静态 filterKeyEvents 后，为保 L3 唤出把焦点窗改成常驻聚焦，结果焦点窗持续抢焦点、干扰手指触摸。修复：焦点窗跟随鼠标开关切换聚焦（`if (!mouseActive) FLAG_NOT_FOCUSABLE`，对齐参考应用），L3 唤出靠运行时 filterKeyEvents 的 onKeyEvent。
 16. **滚动限流形同虚设**：`scrollGestureBusy` 状态把 `scrollChainCount` 清零，导致「连续 N 次后暂停」从未生效。修复：只在摇杆真正回中（`scrollLen <= dead`）时重置计数与冷却。
 17. **闪退真凶（v1.1 铁证定位）**：logcat 其实可读（"荣耀 logcat 加密"结论有误）。每次"闪退"时 logcat 都有 `ZRHungService: BF and NFW forceStop package: com.joymouse.app`——MagicOS 的 `ZrHung.AppEyeFocusWindow` 焦点探针（system_server 内）强停应用并吊销无障碍服务（`enabled_accessibility_services` 被清）。触发条件：旧实现**每次注入手势都切换窗口焦点**（focusable=false → 派发 → 400ms → focusable=true），滚动/连点时每秒十几次焦点振荡，反复制造"无焦点窗口(NFW)"状态。铁证：同设备参考应用 Gamepad Mouse 在同一时段**从未**被 ZRHungService 强停（只有 iAwareF 低内存/划掉清理）。修复：a) 注入时默认不动焦点（对齐参考应用）；b) 可选"焦点租约"clickFocusRelease（整批注入最多让出一次焦点、2.5s 冷却，默认关，兼容失焦不响应点击的游戏）；c) XML 去掉静态 accessibilityFlags，运行时 setServiceInfo 启用（flags=0x20 实测生效）；d) 全部诊断日志改后台单线程异步写入+2MB 滚动截断（主线程零文件 I/O，也消除日志导致的卡顿帧）；e) 5 秒心跳日志（强停瞬间现场=日志尾部）；f) monitor.sh v2：常驻 logcat 抓取 + 强停时全量快照（exit-info/app日志/logcat 过滤/窗口焦点）。
@@ -60,7 +60,7 @@ OverlayController
 
 ## 四、与参考应用的功能对照
 
-| 功能 | Gamepad Mouse | JoyMouse |
+| 功能 | Gamepad Mouse | Ice Padmouse |
 |------|:---:|:---:|
 | 左摇杆移光标（死区+曲线） | ✅ | ✅（曲线已修正） |
 | 右摇杆滚动 | ✅ | ✅ |

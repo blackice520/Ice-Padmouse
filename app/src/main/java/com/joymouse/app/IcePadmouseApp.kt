@@ -9,7 +9,7 @@ import java.io.StringWriter
  * 之后可通过 `adb shell run-as com.joymouse.app cat files/crash.log` 读取定位。
  * 崩溃栈必须同步落盘（进程即将死亡，后台队列来不及刷出）。
  */
-class JoyMouseApp : Application() {
+class IcePadmouseApp : Application() {
 
     private val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
 
