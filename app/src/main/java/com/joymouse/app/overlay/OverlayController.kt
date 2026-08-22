@@ -319,12 +319,45 @@ class OverlayController(private val service: GestureAccessibilityService) {
         scheduleCursorHide()
     }
 
-    /** 播放/暂停：派发系统媒体键（无需权限、走系统媒体会话栈）；
-     *  派发失败时回退为双击屏幕中央（视频 App 的中央暂停区）。
-     *  已知瑕疵：本 ROM 上应用重启后第一次派发会触发手柄蓝牙 AVRCP 竞态导致
-     *  手柄断联一次，重连后正常（通知使用权方案已实测无效，已移除）。 */
+    /** 播放/暂停（三级回退）：
+     *  1) 已授权通知使用权 → getActiveSessions(监听组件) 拿到媒体会话，transportControls
+     *     直接控制——完全不经过蓝牙/AVRCP 通道，根治"重启后第一次按 Y 手柄断联"。
+     *     注意必须传监听组件：传 null 走 MEDIA_CONTENT_CONTROL 权限路径必抛异常
+     *     （上次方案失败的根因）。
+     *  2) 未授权/无会话/异常 → 媒体键派发（已知副作用：重启后首次派发可能断联一次）；
+     *  3) 最后回退双击屏幕中央。 */
     fun toggleMediaPlayPause() {
         try {
+            val cn = android.content.ComponentName(
+                ctx, com.joymouse.app.service.MediaNotificationListener::class.java
+            )
+            val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as? android.app.NotificationManager
+            val listenerGranted = nm?.isNotificationListenerAccessGranted(cn) == true
+            if (listenerGranted) {
+                val msm = ctx.getSystemService(Context.MEDIA_SESSION_SERVICE) as? android.media.session.MediaSessionManager
+                val sessions = try {
+                    msm?.getActiveSessions(cn) ?: emptyList()
+                } catch (t: Throwable) {
+                    logEvent("media", "getActiveSessions failed: ${t.javaClass.simpleName}")
+                    emptyList()
+                }
+                val playing = sessions.firstOrNull {
+                    it.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
+                }
+                val session = playing ?: sessions.firstOrNull {
+                    it.playbackState?.state?.let { s ->
+                        s != android.media.session.PlaybackState.STATE_NONE
+                    } == true
+                }
+                if (session != null) {
+                    val isPlaying = session.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
+                    if (isPlaying) session.transportControls.pause() else session.transportControls.play()
+                    logEvent("media", "playPause via transportControls")
+                    return
+                }
+                logEvent("media", "no active session, fallback media key")
+            }
+            // 回退 1：媒体键派发
             val am = ctx.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
             if (am != null) {
                 val down = KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
@@ -334,7 +367,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
                 logEvent("media", "playPause via dispatchMediaKeyEvent")
                 return
             }
-            // 兜底：双击屏幕中央
+            // 回退 2：双击屏幕中央
             GestureAccessibilityService.instance?.doubleTap(screenW / 2f, screenH / 2f)
             logEvent("media", "playPause fallback doubleTap")
         } catch (t: Throwable) {

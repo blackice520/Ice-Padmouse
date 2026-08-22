@@ -245,6 +245,62 @@
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
 
+            <!-- 通知使用权（播放/暂停增强，避免媒体键触发手柄断联） -->
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                app:cardBackgroundColor="@color/card_bg"
+                app:cardCornerRadius="14dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="通知使用权（播放/暂停增强）"
+                        android:textSize="15sp"
+                        android:textStyle="bold"
+                        android:textColor="#333333" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <TextView
+                            android:id="@+id/tvNlStatus"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="○ 未授权"
+                            android:textSize="14sp"
+                            android:textColor="@color/status_off" />
+
+                        <Button
+                            android:id="@+id/btnNl"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="去授权" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="授权后播放/暂停直接控制媒体会话、不经过蓝牙通道，可避免重启后第一次按 Y 导致手柄断联。不授权也能用（走媒体键，有上述小概率副作用）。"
+                        android:textSize="12sp"
+                        android:textColor="#777777"
+                        android:lineSpacingExtra="2dp" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
             <!-- 控制台 -->
             <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
