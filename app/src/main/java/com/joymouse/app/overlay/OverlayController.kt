@@ -110,16 +110,13 @@ class OverlayController(private val service: GestureAccessibilityService) {
     var mouseActive = false
         private set
 
-    // ---- 焦点按需保持 ----
-    // 焦点窗（1×1 手柄捕获窗）只在"手柄正在被使用"时持有输入焦点：
-    // 手柄按键/摇杆事件到达即续期，空闲 FOCUS_HOLD_MS 后让出焦点（窗口保留、不销毁）。
-    // 实测证据（dumpsys window）：旧实现长期持有焦点时，系统把我们的 1×1 窗口当作
-    // imeInputTarget——"不可见窗口霸占输入焦点"正是 MagicOS AppEyeFocusWindow 探针
-    // 最可疑的触发态；让出焦点后按键仍经服务 onKeyEvent（filterKeyEvents）送达，
-    // 只有摇杆轴事件依赖焦点窗，因此空闲让出几乎不损失功能。
+    // ---- 焦点策略（v1.3 定稿 + v1.4 选项化） ----
+    // 默认（focusIdleRelease=false）：鼠标激活期间焦点窗始终持有焦点（对齐参考应用，
+    // 无"空闲后要按两次"问题）。开启 focusIdleRelease 后：空闲 FOCUS_HOLD_MS(2 分钟)
+    // 让出焦点（窗口保留），手柄按键/摇杆事件到达即续期——供需要窗口焦点的游戏使用。
     private var focusHeld = false
     private var lastGamepadInput = 0L
-    private val FOCUS_HOLD_MS = 5000L
+    private val FOCUS_HOLD_MS = 2 * 60 * 1000L
 
     /** 手柄输入活跃：续期焦点保持；若当前未持有焦点则申请（按键路径在无焦点时也可靠） */
     private fun renewFocusHold() {
@@ -130,8 +127,9 @@ class OverlayController(private val service: GestureAccessibilityService) {
         }
     }
 
-    /** 空闲超时让出焦点（tick 中调用） */
+    /** 空闲超时让出焦点（仅 focusIdleRelease 开启时生效，tick 中调用） */
     private fun maybeReleaseFocusHold() {
+        if (!config.focusIdleRelease) return
         if (focusHeld && System.currentTimeMillis() - lastGamepadInput > FOCUS_HOLD_MS) {
             focusHeld = false
             applyFocusViewFocusable(false)

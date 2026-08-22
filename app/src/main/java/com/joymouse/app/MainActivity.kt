@@ -179,6 +179,13 @@ class MainActivity : AppCompatActivity() {
             OverlayController.instance?.onCursorSettingsChanged()
         }
 
+        val swFocusIdle = findViewById<SwitchCompat>(R.id.swFocusIdle)
+        swFocusIdle.isChecked = config.focusIdleRelease
+        swFocusIdle.setOnCheckedChangeListener { _, checked ->
+            config.focusIdleRelease = checked
+            ConfigStore.save(this, config)
+        }
+
         val swSwapAB = findViewById<SwitchCompat>(R.id.swSwapAB)
         swSwapAB.isChecked = config.swapAB
         swSwapAB.setOnCheckedChangeListener { _, checked ->

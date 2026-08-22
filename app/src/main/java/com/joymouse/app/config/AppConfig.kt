@@ -97,6 +97,7 @@ data class AppConfig(
     var toggleKey: String = "l3",      // 唤出/关闭鼠标的手柄键
     var buttonsVisible: Boolean = true,// 自定义按键是否显示
     var mappingVersion: Int = 2,       // 默认映射版本（用于升级迁移）
+    var focusIdleRelease: Boolean = false, // 空闲 2 分钟让出窗口焦点（游戏友好）。默认关=鼠标激活期间始终持有焦点
     var gamepadMap: MutableMap<String, String> = mutableMapOf(), // 手柄键名 -> 动作 id
     var buttons: MutableList<MappedButton> = mutableListOf()
 ) {
@@ -137,6 +138,7 @@ data class AppConfig(
             .put("toggleKey", toggleKey)
             .put("buttonsVisible", buttonsVisible)
             .put("mappingVersion", mappingVersion)
+            .put("focusIdleRelease", focusIdleRelease)
             .put("gamepadMap", gm)
             .put("buttons", arr)
     }
@@ -168,6 +170,7 @@ data class AppConfig(
                 cfg.toggleKey = o.optString("toggleKey", "l3")
                 cfg.buttonsVisible = o.optBoolean("buttonsVisible", true)
                 cfg.mappingVersion = o.optInt("mappingVersion", 1)
+                cfg.focusIdleRelease = o.optBoolean("focusIdleRelease", false)
                 val gm = o.optJSONObject("gamepadMap")
                 if (gm != null) {
                     val it = gm.keys()
