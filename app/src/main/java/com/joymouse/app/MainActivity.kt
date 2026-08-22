@@ -84,9 +84,6 @@ class MainActivity : AppCompatActivity() {
                 )
             )
         }
-        findViewById<Button>(R.id.btnNl).setOnClickListener {
-            startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-        }
         findViewById<Button>(R.id.btnTogglePanel).setOnClickListener { togglePanel() }
         findViewById<Button>(R.id.btnEditLayout).setOnClickListener { toggleEdit() }
         findViewById<Button>(R.id.btnStyle).setOnClickListener {
@@ -221,11 +218,6 @@ class MainActivity : AppCompatActivity() {
         tvBattery.setTextColor(
             if (batteryOn) getColor(R.color.status_on) else getColor(R.color.status_off)
         )
-        // 通知使用权（播放/暂停增强）
-        val nlOn = notificationListenerGranted()
-        val tvNl = findViewById<TextView>(R.id.tvNlStatus)
-        tvNl.text = if (nlOn) "● 已授权" else "○ 未授权"
-        tvNl.setTextColor(if (nlOn) getColor(R.color.status_on) else getColor(R.color.status_off))
         findViewById<Button>(R.id.btnTogglePanel).text =
             if (OverlayController.instance?.panelVisible() == true) "隐藏悬浮控制台" else "显示悬浮控制台"
     }
@@ -233,14 +225,6 @@ class MainActivity : AppCompatActivity() {
     private fun batteryExempt(): Boolean {
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         return pm.isIgnoringBatteryOptimizations(packageName)
-    }
-
-    private fun notificationListenerGranted(): Boolean {
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-        val cn = android.content.ComponentName(
-            this, com.joymouse.app.service.MediaNotificationListener::class.java
-        )
-        return nm.isNotificationListenerAccessGranted(cn)
     }
 
     private fun isAccessibilityEnabled(): Boolean {
