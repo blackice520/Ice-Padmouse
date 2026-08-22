@@ -1,4 +1,4 @@
-# JoyMouse 手柄鼠标映射（Android）· v2.0
+# JoyMouse 手柄鼠标映射（Android）· v2.1
 
 在手机上模拟电脑鼠标操作的免 root 手柄映射应用，另含**游戏模式**（不使用焦点窗、手游全程保持焦点）。独立实现，无第三方 SDK。
 
@@ -114,6 +114,11 @@ bash scripts/monitor.sh    # 常驻监控：logcat 抓取 + 强停瞬间全量�
 `iAwareF[SystemManagerSwipeUp]` = 用户划掉最近任务；`iAwareF[LowMem]` = 低内存回收；`PACKAGE UPDATED` = 安装更新。
 
 ## 更新日志
+
+### v2.1
+
+- **更换应用图标**：由 Gemini 生成的新图标（`assets/launcher-icon-1024x1024.jpg` 归档保存），生成各密度 mipmap PNG 图标（`mipmap-*/ic_launcher.png`）；移除自适应图标 XML（荣耀桌面会把空前景矢量回退成默认机器人 logo），替换原矢量鼠标图标
+- versionCode=4 / versionName=2.1
 
 ### v2.0
 
