@@ -8,3 +8,6 @@ local.properties
 *.iml
 .DS_Store
 monitor.log
+
+# 开发日志/文档（本地保留，不上传）
+docs/

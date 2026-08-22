@@ -35,19 +35,7 @@ class GestureAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
-        // 运行时动态开启 filterKeyEvents（对齐参考应用 Gamepad Mouse）：
-        // 在 XML 里静态声明 accessibilityFlags 会被 MagicOS 无障碍看门狗判定高危并强停，
-        // 改为运行时 setServiceInfo 设置 FLAG_REQUEST_FILTER_KEY_EVENTS，让鼠标休眠时仍能
-        // 全局收到唤出键(L3)，同时避免静态声明触发看门狗。
-        try {
-            serviceInfo = AccessibilityServiceInfo().apply {
-                eventTypes = AccessibilityEvent.TYPES_ALL_MASK
-                feedbackType = AccessibilityServiceInfo.FEEDBACK_GENERIC
-                notificationTimeout = 100
-                flags = AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
-            }
-        } catch (_: Throwable) {
-        }
+        // filterKeyEvents 已在 XML 里静态声明（accessibilityFlags），无需运行时 setServiceInfo。
         // 启动标记：验证按键日志写入路径是否可用
         try {
             java.io.FileOutputStream(java.io.File(filesDir, "keys.log"), true).use {

@@ -35,7 +35,7 @@ import kotlin.math.pow
  * 光标与手柄捕获窗口均使用 TYPE_ACCESSIBILITY_OVERLAY（无障碍专用窗口类型），
  * 不需要 SYSTEM_ALERT_WINDOW 悬浮窗权限。
  *
- * 与参考应用（gamepad mouse）不同：唤出/移动光标绝不派发任何额外手势，
+ * 与同类应用（同类手柄应用）不同：唤出/移动光标绝不派发任何额外手势，
  * 不存在"唤出鼠标自动点击左上角"的问题。
  */
 class OverlayController(private val service: GestureAccessibilityService) {
@@ -103,8 +103,10 @@ class OverlayController(private val service: GestureAccessibilityService) {
     private var lastConfigSave = 0L
 
     // ---- 鼠标（手柄）状态 ----
-    /** 鼠标是否激活：激活时显示光标并捕获手柄输入 */
-    var mouseActive = true
+    /** 鼠标是否激活：激活时显示光标并捕获手柄输入。
+     *  默认 false（对齐同类应用）：启动时不抢焦点，避免焦点窗聚焦触发 MagicOS 强停；
+     *  用户按 L3/面板按钮唤出时才激活。 */
+    var mouseActive = false
         private set
 
     /** 左摇杆速度向量（物理手柄，归一化，由 tick 处理） */
@@ -118,7 +120,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
     /** 右摇杆滚动方向向量 */
     private var scrollX = 0f
     private var scrollY = 0f
-    /** 滚动手势链是否进行中（参考应用方案：手势完成回调后立即派发下一个，形成连续滚动流） */
+    /** 滚动手势链是否进行中（同类应用方案：手势完成回调后立即派发下一个，形成连续滚动流） */
     private var scrollGestureBusy = false
     /** 滚动被取消/拒绝的时间（退避用） */
     private var lastScrollCancel = 0L
@@ -267,7 +269,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
     }
 
     /** 播放/暂停：优先通过活跃媒体会话控制（QQ音乐/视频 App 等）；
-     *  无媒体会话时回退为双击屏幕中央（参考应用的"点按区"思路，适配视频 App 的中央暂停键）。 */
+     *  无媒体会话时回退为双击屏幕中央（同类应用的"点按区"思路，适配视频 App 的中央暂停键）。 */
     fun toggleMediaPlayPause() {
         try {
             val msm = ctx.getSystemService(Context.MEDIA_SESSION_SERVICE) as? android.media.session.MediaSessionManager
@@ -697,8 +699,17 @@ class OverlayController(private val service: GestureAccessibilityService) {
                 attempts++
                 // 每次注入前刷新活动时间：注入手势本身也会触发触摸休眠检测，避免被误判为"用户触摸"而关闭鼠标
                 lastActivity = System.currentTimeMillis()
+                logEvent("inject", "start attempt=$attempts mouseActive=$mouseActive")
                 if (passthrough) setPassthrough(true)
+                // 注入前临时失焦焦点窗，让目标应用(手游)恢复窗口焦点再点击（解决手游失焦点击无效）
+                val restoreFocus = mouseActive
+                if (restoreFocus) applyFocusViewFocusable(false)
                 dispatch { ok ->
+                    logEvent("inject", "done ok=$ok restoreFocus=$restoreFocus")
+                    if (restoreFocus) {
+                        // 注入完成后延迟恢复焦点窗聚焦，给手游足够时间处理这次点击
+                        tickHandler.postDelayed({ if (mouseActive) applyFocusViewFocusable(true) }, 400)
+                    }
                     if (!ok && attempts < 5) {
                         tickHandler.postDelayed(this, 220)
                     } else {
@@ -770,7 +781,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
             }
             // 播放/暂停：通过活跃媒体会话控制
             Action.MEDIA_PLAY_PAUSE -> toggleMediaPlayPause()
-            // 快进/快退：双击屏幕右侧 80% / 左侧 20% 宽度处（参考应用行为，适配视频类 App 点按区）
+            // 快进/快退：双击屏幕右侧 80% / 左侧 20% 宽度处（同类应用行为，适配视频类 App 点按区）
             Action.MEDIA_FORWARD -> s.doubleTap(screenW * 0.8f, cursorY)
             Action.MEDIA_REWIND -> s.doubleTap(screenW * 0.2f, cursorY)
             Action.TOGGLE_MOUSE -> toggleMouse()
@@ -795,43 +806,42 @@ class OverlayController(private val service: GestureAccessibilityService) {
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                     WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
                     WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
-                // 鼠标未激活时焦点窗不聚焦（对齐参考应用）：触摸/按键穿透给下层应用，手指才能正常操作
+                // 启动时 mouseActive=false → 焦点窗 NOT_FOCUSABLE（不抢焦点，避免强停）。
+                // 唤出鼠标后才去掉 NOT_FOCUSABLE（applyFocusViewFocusable）。
                 if (!mouseActive) flags = flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                 x = 0
                 y = 0
             }
             wm.addView(v, gamepadParams)
             gamepadView = v
-            if (mouseActive) requestFocusRetry()
         } catch (t: Throwable) {
             t.printStackTrace()
             gamepadView = null
         }
     }
 
-    /** 焦点窗聚焦状态随鼠标开关切换（对齐参考应用） */
+    /** 焦点窗聚焦状态随鼠标开关切换（对齐同类应用 同类手柄应用 的实现） */
     private fun applyFocusViewFocusable(focusable: Boolean) {
         val v = gamepadView ?: return
         val p = gamepadParams ?: return
+        logEvent("focus", if (focusable) "focusable=true" else "focusable=false")
         p.flags = if (focusable) p.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE.inv()
         else p.flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
         runCatching { wm.updateViewLayout(v, p) }
-        if (focusable) requestFocusRetry()
-    }
-
-    /** requestFocus 有竞态：添加窗口后立即请求可能失败，延迟重试 */
-    private fun requestFocusRetry() {
-        val v = gamepadView ?: return
-        try {
-            v.requestFocus()
-            tickHandler.postDelayed({
-                if (gamepadView === v && !v.hasFocus()) v.requestFocus()
-            }, 100)
-            tickHandler.postDelayed({
-                if (gamepadView === v && !v.hasFocus()) v.requestFocus()
-            }, 400)
-        } catch (t: Throwable) {
-            t.printStackTrace()
+        if (focusable) {
+            // 对齐同类应用：先标记可聚焦，再延迟到下一消息循环 requestFocus。
+            // 同步直接 requestFocus 会被 MagicOS 判定为"恶意抢焦点"而强停。
+            runCatching {
+                v.setFocusable(true)
+                v.setFocusableInTouchMode(true)
+                v.post {
+                    v.requestFocus()
+                    v.requestFocusFromTouch()
+                }
+            }
+        } else {
+            // 对齐同类应用：休眠时清除焦点
+            runCatching { v.clearFocus() }
         }
     }
 
@@ -842,11 +852,12 @@ class OverlayController(private val service: GestureAccessibilityService) {
 
     /**
      * 唤出/关闭鼠标（L3 或面板"鼠标"按钮触发）。唤出过程绝不派发任何手势。
-     * 注意：参考应用的"触摸屏幕自动休眠鼠标"已移除——虚拟控制台用户碰一下
+     * 注意：同类应用的"触摸屏幕自动休眠鼠标"已移除——虚拟控制台用户碰一下
      * 应用界面鼠标就没了、摇杆失灵，体验灾难。鼠标只由 L3/按钮/空闲超时(默认关)控制。
      */
     fun toggleMouse() {
         mouseActive = !mouseActive
+        logEvent("mouse", if (mouseActive) "ON" else "OFF")
         if (mouseActive) {
             showCursor()
             applyFocusViewFocusable(true)
@@ -874,6 +885,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
      * 关闭后 1.5s 冷却防反复。
      */
     fun onOutsideTouch(x: Float, y: Float) {
+        logEvent("outside", "x=$x y=$y mouseActive=$mouseActive")
         if (!mouseActive || editMode) return
         if (leftHeld || dragging) return
         val now = System.currentTimeMillis()
@@ -922,6 +934,16 @@ class OverlayController(private val service: GestureAccessibilityService) {
         try {
             val line = "${System.currentTimeMillis()} [scroll] $msg\n"
             java.io.FileOutputStream(java.io.File(ctx.filesDir, "scroll.log"), true)
+                .use { it.write(line.toByteArray()) }
+        } catch (_: Throwable) {
+        }
+    }
+
+    /** 统一事件日志：记录焦点切换/鼠标开关/触摸/注入等关键事件，强停后据此定位真实原因 */
+    private fun logEvent(tag: String, msg: String) {
+        try {
+            val line = "${System.currentTimeMillis()} [$tag] $msg\n"
+            java.io.FileOutputStream(java.io.File(ctx.filesDir, "events.log"), true)
                 .use { it.write(line.toByteArray()) }
         } catch (_: Throwable) {
         }
@@ -1072,7 +1094,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
         // 1) 左摇杆 → 光标速度（死区 + 幂次曲线）
         //    曲线: v = norm^exp, exp = 2.5 - sensitivity*0.015（1..2.5）
         //    灵敏度越高 exp 越低 → 越线性（低偏转响应越快）。
-        //    恒为正且单调 —— 修复参考应用公式在默认灵敏度下产生负速度导致的"反向乱飘"
+        //    恒为正且单调 —— 修复同类应用公式在默认灵敏度下产生负速度导致的"反向乱飘"
         val dead = cfg.deadzone / 100f
         val len = hypot(stickX, stickY)
         if (len > dead) {
@@ -1147,13 +1169,13 @@ class OverlayController(private val service: GestureAccessibilityService) {
         }
         if (leftDragging) {
             val g = GestureAccessibilityService.instance
-            if (g != null && now - lastDragMoveTime > 40) { // 节流，与参考应用一致
+            if (g != null && now - lastDragMoveTime > 40) { // 节流，与同类应用一致
                 lastDragMoveTime = now
                 g.dragMove(cursorX, cursorY)
             }
         }
 
-        // 4) 右摇杆 → 链式滚动（参考应用方案，已加看门狗防护）
+        // 4) 右摇杆 → 链式滚动（同类应用方案，已加看门狗防护）
         //    派发一个滑动，完成回调后立即派发下一个 → 连续无间隙的滚动流；
         //    方向跟随摇杆（摇杆向下=手指上滑=页面下滚），长度随推杆幅度与滚动速度设置变化
         val scrollLen = hypot(scrollX, scrollY)
@@ -1395,7 +1417,7 @@ class OverlayController(private val service: GestureAccessibilityService) {
             w, h,
             // 无障碍专用窗口类型：由无障碍服务创建，无需 SYSTEM_ALERT_WINDOW 权限
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            // LAYOUT_IN_SCREEN 保证窗口坐标与注入手势同为屏幕坐标系（对齐参考应用）
+            // LAYOUT_IN_SCREEN 保证窗口坐标与注入手势同为屏幕坐标系（对齐同类应用）
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or

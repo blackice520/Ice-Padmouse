@@ -1,11 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 对齐参考应用(Gamepad Mouse)的配置。
-     canRequestFilterKeyEvents=true 仅声明能力；真正的 filterKeyEvents 在运行时通过
-     setServiceInfo() 动态开启（见 GestureAccessibilityService.onServiceConnected），
-     避免在 XML 里静态声明 accessibilityFlags 触发 MagicOS 无障碍看门狗强停。 -->
+<!-- filterKeyEvents 用 XML 静态声明（MagicOS 忽略运行时 setServiceInfo 的该 flag），
+     用于鼠标休眠时全局响应 L3 唤出。强停根因是"焦点窗聚焦抢焦点"，与 filterKeyEvents 无关。 -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeAllMask"
     android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault|flagRequestFilterKeyEvents"
     android:canPerformGestures="true"
     android:canRequestFilterKeyEvents="true"
     android:canRetrieveWindowContent="true"

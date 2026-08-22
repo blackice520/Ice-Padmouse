@@ -1,7 +1,6 @@
 # JoyMouse 手柄鼠标映射（Android）· v1.1
 
-在手机上模拟电脑鼠标操作的免 root 手柄/按键映射应用。
-功能与架构参考 [Gamepad Mouse](docs/reference-analysis.md)（已逆向分析其 APK，独立实现）。
+在手机上模拟电脑鼠标操作的免 root 手柄/按键映射应用，独立实现。
 
 ## 功能
 

@@ -241,7 +241,7 @@ object ConfigStore {
     /**
      * 手柄默认映射（键名 -> 动作 id）。
      * v2（用户定制）：A=单击 B=返回 X=唤出/隐藏光标 Y=播放/暂停，
-     * 其余对齐参考应用：L1=静音 R2=截屏 十字键=音量/媒体，L3=唤出键。
+     * 其余对齐同类应用：L1=静音 R2=截屏 十字键=音量/媒体，L3=唤出键。
      */
     fun defaultGamepadMap(): Map<String, String> = linkedMapOf(
         "a" to "click",
