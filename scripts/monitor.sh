@@ -13,6 +13,22 @@ RE_ENABLE=${RE_ENABLE:-1}
 
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*" >> "$OUT"; }
 
+# ---- 日志轮转：防止无限增长 ----
+# logcat.log > 20MB → 覆盖为 .old；monitor.log > 2MB → 覆盖为 .old
+rotate_if_needed() {
+  local size
+  size=$(stat -c%s "$LCAT" 2>/dev/null || echo 0)
+  if [ "${size:-0}" -gt $((20 * 1024 * 1024)) ]; then
+    mv -f "$LCAT" "${LCAT}.old" 2>/dev/null || true
+    log "!!! logcat.log 达到 20MB，已轮转为 logcat.log.old"
+  fi
+  size=$(stat -c%s "$OUT" 2>/dev/null || echo 0)
+  if [ "${size:-0}" -gt $((2 * 1024 * 1024)) ]; then
+    mv -f "$OUT" "${OUT}.old" 2>/dev/null || true
+    echo "$(date '+%Y-%m-%d %H:%M:%S') monitor.log 达到 2MB，已轮转为 monitor.log.old" >> "$OUT"
+  fi
+}
+
 # ---- 常驻 logcat 抓取（已运行则复用） ----
 if [ ! -f "$DIR/.logcat.pid" ] || ! kill -0 "$(cat "$DIR/.logcat.pid" 2>/dev/null)" 2>/dev/null; then
   nohup $ADB logcat -v threadtime > "$LCAT" 2>&1 &
@@ -79,6 +95,7 @@ re_enable_svc
 
 while true; do
   sleep 15
+  rotate_if_needed
   PID=$($ADB shell pidof "$PKG" 2>/dev/null | tr -d '\r\n')
   COUNT=$(force_stop_count)
   ZR=$(zrhung_count)
