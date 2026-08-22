@@ -283,7 +283,7 @@ class GestureAccessibilityService : AccessibilityService() {
     fun performGlobal(action: Action) {
         logGesture("global", action.id)
         val am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        when (action) {
+        val ok = when (action) {
             Action.HOME -> performGlobalAction(GLOBAL_ACTION_HOME)
             Action.BACK -> performGlobalAction(GLOBAL_ACTION_BACK)
             Action.RECENTS -> performGlobalAction(GLOBAL_ACTION_RECENTS)
@@ -292,12 +292,20 @@ class GestureAccessibilityService : AccessibilityService() {
             Action.SCREENSHOT ->
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                     performGlobalAction(GLOBAL_ACTION_TAKE_SCREENSHOT)
+                } else {
+                    false
                 }
-            Action.VOLUME_UP ->
+            Action.VOLUME_UP -> {
                 am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_RAISE, 0)
-            Action.VOLUME_DOWN ->
+                true
+            }
+            Action.VOLUME_DOWN -> {
                 am.adjustStreamVolume(AudioManager.STREAM_MUSIC, AudioManager.ADJUST_LOWER, 0)
-            else -> { /* 非全局动作 */ }
+                true
+            }
+            else -> false // 非全局动作
         }
+        // 结果落盘：result=false 说明系统拒绝了该全局动作，便于定位"映射不生效"
+        logGesture("global", "${action.id} result=$ok")
     }
 }

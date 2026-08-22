@@ -315,36 +315,28 @@ class OverlayController(private val service: GestureAccessibilityService) {
         scheduleCursorHide()
     }
 
-    /** 播放/暂停：优先通过活跃媒体会话控制（QQ音乐/视频 App 等）；
-     *  无媒体会话时回退为双击屏幕中央（同类应用的"点按区"思路，适配视频 App 的中央暂停键）。 */
+    /** 播放/暂停：优先派发系统媒体键（无需权限、走系统媒体会话栈）；
+     *  派发失败时回退为双击屏幕中央（视频 App 的中央暂停区）。 */
     fun toggleMediaPlayPause() {
         try {
-            val msm = ctx.getSystemService(Context.MEDIA_SESSION_SERVICE) as? android.media.session.MediaSessionManager
-            var handled = false
-            if (msm != null) {
-                val sessions = msm.getActiveSessions(null)
-                val playing = sessions.firstOrNull {
-                    it.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
-                }
-                val session = playing ?: sessions.firstOrNull {
-                    it.playbackState?.state?.let { s ->
-                        s != android.media.session.PlaybackState.STATE_NONE
-                    } == true
-                }
-                if (session != null) {
-                    val isPlaying = session.playbackState?.state == android.media.session.PlaybackState.STATE_PLAYING
-                    if (isPlaying) session.transportControls.pause()
-                    else session.transportControls.play()
-                    handled = true
-                }
+            val am = ctx.getSystemService(Context.AUDIO_SERVICE) as? android.media.AudioManager
+            if (am != null) {
+                val down = KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+                val up = KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE)
+                am.dispatchMediaKeyEvent(down)
+                am.dispatchMediaKeyEvent(up)
+                logEvent("media", "playPause via dispatchMediaKeyEvent")
+                return
             }
-            if (!handled) {
-                // 兜底：双击屏幕中央（视频 App 暂停区）
-                android.util.Log.w("JoyMouse", "播放/暂停：无活跃媒体会话，回退为双击屏幕中央")
-                GestureAccessibilityService.instance?.doubleTap(screenW / 2f, screenH / 2f)
-            }
+            // 兜底：双击屏幕中央
+            GestureAccessibilityService.instance?.doubleTap(screenW / 2f, screenH / 2f)
+            logEvent("media", "playPause fallback doubleTap")
         } catch (t: Throwable) {
-            t.printStackTrace()
+            try {
+                GestureAccessibilityService.instance?.doubleTap(screenW / 2f, screenH / 2f)
+            } catch (_: Throwable) {
+            }
+            logEvent("media", "playPause fallback after error: ${t.javaClass.simpleName}")
         }
     }
 
